@@ -1,5 +1,7 @@
 .DS_Store
 *.key
-*.json
+node_modules/
 subzeroclaw/subzeroclaw
-contracts/addresses.env
+.privkey
+wallet.json
+state.json

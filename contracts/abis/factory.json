@@ -1,0 +1,194 @@
+[
+  {
+    "type": "function",
+    "name": "getActiveDebates",
+    "inputs": [],
+    "outputs": [{"type": "address[]"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getActiveDebatesCount",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getResolvingDebatesCount",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getResolvedDebatesCount",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUndeterminedDebatesCount",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getDebatesByStatus",
+    "inputs": [{"name": "status", "type": "uint8"}],
+    "outputs": [{"type": "address[]"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAllDebates",
+    "inputs": [],
+    "outputs": [{"type": "address[]"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getResolvedDebates",
+    "inputs": [],
+    "outputs": [{"type": "address[]"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUndeterminedDebates",
+    "inputs": [],
+    "outputs": [{"type": "address[]"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getDebateCount",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isLegitDebate",
+    "inputs": [{"name": "debate", "type": "address"}],
+    "outputs": [{"type": "bool"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserStats",
+    "inputs": [{"name": "user", "type": "address"}],
+    "outputs": [
+      {"name": "totalWinnings", "type": "uint256"},
+      {"name": "totalBets", "type": "uint256"},
+      {"name": "debatesParticipated", "type": "uint256"},
+      {"name": "debatesWon", "type": "uint256"},
+      {"name": "totalClaimed", "type": "uint256"},
+      {"name": "netProfit", "type": "int256"},
+      {"name": "winRate", "type": "uint256"}
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserDebates",
+    "inputs": [{"name": "user", "type": "address"}],
+    "outputs": [{"type": "address[]"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserDebatesCount",
+    "inputs": [{"name": "user", "type": "address"}],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getTotalUniqueBettors",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getTotalVolume",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getConfig",
+    "inputs": [],
+    "outputs": [
+      {"name": "minimumBet", "type": "uint256"},
+      {"name": "minimumDebateDuration", "type": "uint256"},
+      {"name": "maxArgumentLength", "type": "uint256"},
+      {"name": "maxTotalContentBytes", "type": "uint256"},
+      {"name": "maxStatementLength", "type": "uint256"},
+      {"name": "maxDescriptionLength", "type": "uint256"},
+      {"name": "maxSideNameLength", "type": "uint256"}
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "placeBet",
+    "inputs": [
+      {"name": "debateAddress", "type": "address"},
+      {"name": "onSideA", "type": "bool"},
+      {"name": "lockedAmount", "type": "uint256"},
+      {"name": "unlockedAmount", "type": "uint256"},
+      {"name": "argument", "type": "string"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "createDebate",
+    "inputs": [
+      {"name": "statement", "type": "string"},
+      {"name": "description", "type": "string"},
+      {"name": "sideAName", "type": "string"},
+      {"name": "sideBName", "type": "string"},
+      {"name": "endDate", "type": "uint256"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claim",
+    "inputs": [{"name": "debateAddress", "type": "address"}],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "addBounty",
+    "inputs": [
+      {"name": "debateAddress", "type": "address"},
+      {"name": "amount", "type": "uint256"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimBountyRefund",
+    "inputs": [{"name": "debateAddress", "type": "address"}],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "resolveDebate",
+    "inputs": [{"name": "debateAddress", "type": "address"}],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  }
+]

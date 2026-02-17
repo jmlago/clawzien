@@ -1,0 +1,14 @@
+{
+  "note": "molly.fun uses GenLayer intelligent contracts via molly-cli, not standard EVM ABIs. See skills/molly/earner.md for CLI commands.",
+  "genlayer": {
+    "MoltBookID": "0xB32bf752d735576AE6f93AF27A529b240b3D4104",
+    "CampaignFactory": "0x0F78AEd50d0BC19b97b7c2ba0e03ed583F9DD58E",
+    "BridgeSender": "0x237EbF2822EB34E4532960908DbF926050b8bD60"
+  },
+  "baseSepolia": {
+    "CampaignFactory": "0xD1Cb8100AE8607b638Ad930A9F57799Ed60300fc",
+    "MoltBookID": "0xff6c918c7da3Ee54B1Ab42583F1efd00dDC10087",
+    "BridgeReceiver": "0x8A854e0F2B5350B5c012336022516EC6fAfE14DA",
+    "BridgeForwarder": "0x42fe21c05cCbc4Da0010a50ad153c97466835aCb"
+  }
+}

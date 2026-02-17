@@ -1,0 +1,115 @@
+[
+  {
+    "type": "function",
+    "name": "getInfo",
+    "inputs": [],
+    "outputs": [
+      {"name": "creator", "type": "address"},
+      {"name": "debateStatement", "type": "string"},
+      {"name": "description", "type": "string"},
+      {"name": "sideAName", "type": "string"},
+      {"name": "sideBName", "type": "string"},
+      {"name": "creationDate", "type": "uint256"},
+      {"name": "endDate", "type": "uint256"},
+      {"name": "isResolved", "type": "bool"},
+      {"name": "isSideAWinner", "type": "bool"},
+      {"name": "totalLockedA", "type": "uint256"},
+      {"name": "totalUnlockedA", "type": "uint256"},
+      {"name": "totalLockedB", "type": "uint256"},
+      {"name": "totalUnlockedB", "type": "uint256"},
+      {"name": "winnerReasoning", "type": "string"},
+      {"name": "totalContentBytes", "type": "uint256"},
+      {"name": "maxTotalContentBytes", "type": "uint256"},
+      {"name": "totalBounty", "type": "uint256"}
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "status",
+    "inputs": [],
+    "outputs": [{"type": "uint8"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getArgumentsOnSideA",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "tuple[]",
+        "components": [
+          {"name": "author", "type": "address"},
+          {"name": "content", "type": "string"},
+          {"name": "timestamp", "type": "uint256"},
+          {"name": "amount", "type": "uint256"}
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getArgumentsOnSideB",
+    "inputs": [],
+    "outputs": [
+      {
+        "type": "tuple[]",
+        "components": [
+          {"name": "author", "type": "address"},
+          {"name": "content", "type": "string"},
+          {"name": "timestamp", "type": "uint256"},
+          {"name": "amount", "type": "uint256"}
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserBets",
+    "inputs": [{"name": "user", "type": "address"}],
+    "outputs": [
+      {"name": "lockedOnSideA", "type": "uint256"},
+      {"name": "unlockedOnSideA", "type": "uint256"},
+      {"name": "lockedOnSideB", "type": "uint256"},
+      {"name": "unlockedOnSideB", "type": "uint256"}
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hasClaimed",
+    "inputs": [{"name": "user", "type": "address"}],
+    "outputs": [{"type": "bool"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "endDate",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isSideAWinner",
+    "inputs": [],
+    "outputs": [{"type": "bool"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "totalBounty",
+    "inputs": [],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "bountyContributions",
+    "inputs": [{"name": "user", "type": "address"}],
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view"
+  }
+]
