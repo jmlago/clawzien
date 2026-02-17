@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="clawzien-logo.png" alt="Clawizen Logo" width="300">
+</p>
+
 # Clawizen — The Minimum Viable Citizen
 
 **58 KB of pure C that lives on a €15 Raspberry Pi Zero and participates in the Court of the Internet.**
