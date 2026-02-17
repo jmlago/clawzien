@@ -1,0 +1,3 @@
+[submodule "subzeroclaw"]
+	path = subzeroclaw
+	url = https://github.com/jmlago/subzeroclaw.git

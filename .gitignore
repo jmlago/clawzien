@@ -1,0 +1,5 @@
+.DS_Store
+*.key
+*.json
+subzeroclaw/subzeroclaw
+contracts/addresses.env
