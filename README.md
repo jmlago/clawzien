@@ -2,43 +2,32 @@
   <img src="clawzien-logo.png" alt="Clawizen Logo" width="300">
 </p>
 
-# Clawizen — The Minimum Viable Citizen
+# Clawizen — The Minimum Viable GenLayer Citizen
 
-A sovereign AI agent that participates in the [GenLayer](https://genlayer.com) ecosystem from a Raspberry Pi Zero powered by a solar panel.
-
-One 54 KB C binary. One private key. Eight skill files. Four protocols. Zero frameworks.
+The cheapest possible way to participate in the [GenLayer](https://genlayer.com) ecosystem. A 54 KB C runtime, a private key, and a set of markdown skill files — running on a Raspberry Pi Zero powered by a solar panel.
 
 ---
 
-## What is this?
+## Why
 
-GenLayer is building an on-chain economy where AI agents — not humans — are the primary participants. Agents debate, review code, earn rewards, and resolve disputes. All outcomes are decided by **Optimistic Democracy**: multiple AI validators running different LLMs independently evaluate evidence and reach consensus.
+GenLayer is building an on-chain economy where AI agents are first-class participants. Agents debate, review code, earn rewards, and resolve disputes. Outcomes are decided by **Optimistic Democracy** — multiple LLMs independently evaluate evidence and reach consensus.
 
-**Clawizen is the cheapest possible way to participate.** It connects [SubZeroClaw](https://github.com/jmlago/subzeroclaw) — a 54 KB agentic runtime written in C — to every GenLayer protocol via plain markdown skill files. No LangChain. No web3.js. No Docker. Just `shell + LLM + cast` running on a board that costs less than lunch.
+Most agent frameworks are overengineered. Hundred-megabyte runtimes, deep dependency trees, cloud-first architectures. Clawizen asks: **what's the minimum?**
 
-It proves that a sovereign citizen of this economy doesn't need a cloud server, a framework, or a devops team. It needs 512 MB of RAM and sunlight.
+A static binary that reads a markdown file, calls an LLM, and executes shell commands. The shell is the integration layer. `cast` talks to Base. `molly-cli` talks to GenLayer. The LLM does the thinking. The skill file is the strategy.
 
-## What it does
+The result: a sovereign citizen that runs on 512 MB of RAM and sunlight.
 
-| Protocol | What the agent does | How |
-|----------|-------------------|-----|
-| [argue.fun](https://argue.fun) | Stakes $ARGUE on debate positions, writes arguments to sway a multi-LLM jury, claims winnings | `cast` on Base |
-| [molly.fun](https://molly.fun) | Joins content campaigns, submits posts, earns token rewards per period | `molly-cli` on GenLayer |
-| [mergeproof](https://mergeproof.com) | Reviews pull requests, finds bugs for bounties, attests code quality with skin in the game | `cast` on GenLayer + Base |
-| [Internet Court](https://internetcourt.org) | Files disputes between agents, submits evidence, receives verdicts from an AI jury | API on GenLayer |
-
-argue.fun and molly.fun are live today. mergeproof and Internet Court are launching soon — the skills are ready, waiting for contract addresses.
-
-## How it works
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
 │  Raspberry Pi Zero 2W  (512 MB RAM, WiFi, <1.5W)│
 │                                                 │
-│  SubZeroClaw (54 KB)                            │
+│  SubZeroClaw (54 KB, 379 lines of C)            │
 │  ┌────────────────────────────────────────────┐ │
 │  │ 1. Read skill file (markdown)              │ │
-│  │ 2. Send to LLM (Claude via OpenRouter)     │ │
+│  │ 2. Send to LLM (any model via OpenRouter)  │ │
 │  │ 3. LLM returns shell commands              │ │
 │  │ 4. Execute via popen()                     │ │
 │  │ 5. Feed output back to LLM                 │ │
@@ -52,6 +41,8 @@ argue.fun and molly.fun are live today. mergeproof and Internet Court are launch
      ┌──────┴──────┐    ┌───────┴───────┐
      │  argue.fun  │    │   molly.fun   │
      │  mergeproof │    │ Internet Court│
+     │   your      │    │   your        │
+     │   protocol  │    │   protocol    │
      └─────────────┘    └───────────────┘
             │                    │
             └────────┬───────────┘
@@ -60,11 +51,22 @@ argue.fun and molly.fun are live today. mergeproof and Internet Court are launch
            (multi-LLM consensus)
 ```
 
-Each skill is a markdown file that gets loaded into the LLM's system prompt, teaching it what contracts to call, what arguments to make, and when to stop. The runtime is 379 lines of C. The entire agent uses < 20 MB of RAM.
+Each skill is a markdown file that teaches the LLM what contracts to call, what arguments to make, and when to stop. Adding a new protocol means writing a new `.md` file — no code changes required.
+
+## Integrated Protocols
+
+| Protocol | Status | What the agent does |
+|----------|--------|---------------------|
+| [argue.fun](https://argue.fun) | Live | Debate markets on Base — stake, argue, claim |
+| [molly.fun](https://molly.fun) | Live | Content campaigns on GenLayer — post, submit, earn |
+| [mergeproof](https://mergeproof.com) | Coming soon | Staked code reviews — find bugs, attest quality |
+| [Internet Court](https://internetcourt.org) | Coming soon | Agent dispute resolution — file, evidence, verdict |
+
+**Want to add your GenLayer protocol?** See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Skills
 
-SubZeroClaw loads all `.md` files from `~/.subzeroclaw/skills/` into the system prompt automatically. You then pass a text prompt as the command-line argument telling the agent what to do.
+Skills live in `skills/<protocol>/`. SubZeroClaw loads them into the LLM's system prompt. You switch skills with `./setup.sh --skill <protocol>/<name>`.
 
 ```
 skills/
@@ -90,32 +92,27 @@ cd clawizen
 ./setup.sh
 ```
 
-This installs Foundry (`cast`), `molly-cli`, builds SubZeroClaw, generates a wallet, registers on MoltBook, links your identity to molly.fun, and symlinks the skill files into `~/.subzeroclaw/skills/`.
+This installs dependencies, builds SubZeroClaw, generates a wallet, registers on MoltBook, links your identity to molly.fun, and loads the default skill.
 
-Then activate a skill and run it:
+Then run:
 
 ```bash
-# Load the debater skill and run
+# Switch skill and go
 ./setup.sh --skill argue/debater
-./subzeroclaw/subzeroclaw "Scan active debates on argue.fun and place profitable bets"
+./subzeroclaw/subzeroclaw "Scan active debates and place profitable bets"
 
-# Load the heartbeat skill and run
-./setup.sh --skill argue/heartbeat
-./subzeroclaw/subzeroclaw "Run the 4-hour heartbeat routine"
-
-# Load the earner skill and run
 ./setup.sh --skill molly/earner
-./subzeroclaw/subzeroclaw "Browse active molly.fun campaigns and submit content"
+./subzeroclaw/subzeroclaw "Browse campaigns, create a post, and submit it"
 
-# Run as a daemon that never stops
-./subzeroclaw/watchdog ./subzeroclaw/subzeroclaw "Scan argue.fun debates and place profitable bets"
+# Run as a daemon
+./subzeroclaw/watchdog ./subzeroclaw/subzeroclaw "Run argue.fun debater loop"
 ```
 
-> **How it works:** `setup.sh --skill argue/debater` symlinks only `skills/argue/debater.md` into `~/.subzeroclaw/skills/`. SubZeroClaw reads it as the system prompt, then your text argument becomes the user message that kicks off the agentic loop.
+> `setup.sh --skill argue/debater` symlinks `skills/argue/debater.md` into `~/.subzeroclaw/skills/`. SubZeroClaw reads it as the system prompt. Your text argument kicks off the agentic loop.
 
-## Deploy on NixOS (Raspberry Pi Zero 2W)
+## Deploy on Raspberry Pi (NixOS)
 
-Clawizen becomes a set of systemd services that start on boot and survive reboots. The argue.fun heartbeat runs on a 4-hour timer. The MoltBook social heartbeat runs every 30 minutes. Everything is declarative.
+Everything becomes systemd services that start on boot and survive reboots. Heartbeats run on timers. Declarative.
 
 ```bash
 ./setup-nixos.sh
@@ -124,36 +121,21 @@ Clawizen becomes a set of systemd services that start on boot and survive reboot
 | Component | Notes |
 |-----------|-------|
 | SubZeroClaw | 54 KB static aarch64 binary, ~2 MB RAM |
-| Foundry cast | Static aarch64 binary |
-| Total RAM | Agent + cast + molly-cli < 20 MB |
-| Storage | NixOS minimal ~200 MB on microSD |
+| Total RAM | Agent + tools < 20 MB of the 512 MB available |
+| Storage | ~200 MB on microSD |
 | Power | < 1.5 W idle, solar panel friendly |
 
 ## Contract Addresses
 
-### argue.fun (Base, chain ID 8453)
+See [`contracts/addresses.env`](contracts/addresses.env) for the full list. Key addresses:
 
-| Contract | Address |
-|----------|---------|
-| DebateFactory | `0x0692eC85325472Db274082165620829930f2c1F9` |
-| $ARGUE | `0x7FFd8f91b0b1b5c7A2E6c7c9efB8Be0A71885b07` |
-| $lARGUE | `0x2FA376c24d5B7cfAC685d3BB6405f1af9Ea8EE40` |
-| ERC2771Forwarder | `0x6c7726e505f2365847067b17a10C308322Db047a` |
+| Protocol | Contract | Address |
+|----------|----------|---------|
+| argue.fun | Factory | `0x0692eC85325472Db274082165620829930f2c1F9` |
+| argue.fun | $ARGUE | `0x7FFd8f91b0b1b5c7A2E6c7c9efB8Be0A71885b07` |
+| molly.fun | CampaignFactory | `0x0F78AEd50d0BC19b97b7c2ba0e03ed583F9DD58E` |
+| molly.fun | MoltBookID | `0xB32bf752d735576AE6f93AF27A529b240b3D4104` |
 
-### molly.fun (GenLayer)
+## Contributing
 
-| Contract | Address |
-|----------|---------|
-| MoltBookID | `0xB32bf752d735576AE6f93AF27A529b240b3D4104` |
-| CampaignFactory | `0x0F78AEd50d0BC19b97b7c2ba0e03ed583F9DD58E` |
-| BridgeSender | `0x237EbF2822EB34E4532960908DbF926050b8bD60` |
-
-mergeproof and Internet Court addresses will be added when those protocols launch.
-
-## Philosophy
-
-The GenLayer ecosystem is designed for agents. Most agents are overengineered — hundred-megabyte runtimes with dependency trees deeper than the call stack.
-
-Clawizen asks: what's the minimum? A static binary that reads a markdown file, calls an LLM, and executes shell commands. That's it. The shell is the integration layer. `cast` talks to Base. `molly-cli` talks to GenLayer. The LLM does the thinking. The skill file is the strategy.
-
-The result is a sovereign citizen that runs on a board you can hold between two fingers, powered by the sun, earning money while you sleep.
+Clawizen is designed to grow with the GenLayer ecosystem. Adding a new protocol is as simple as writing a markdown skill file. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
