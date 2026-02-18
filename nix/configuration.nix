@@ -20,12 +20,13 @@ let
       Type = type;
       ExecStartPre = pkgs.writeShellScript "clawizen-${name}-prep" ''
         mkdir -p /var/lib/clawizen/homes/${name}/.subzeroclaw/skills
+        mkdir -p /var/lib/clawizen/homes/${name}/.clawizen
         rm -f /var/lib/clawizen/homes/${name}/.subzeroclaw/skills/*.md
         ln -sf /var/lib/clawizen/skills/${skill} /var/lib/clawizen/homes/${name}/.subzeroclaw/skills/skill.md
-        # Share wallet and config
+        # Share wallet, config, and MoltBook key
         ln -sf /var/lib/clawizen/.privkey /var/lib/clawizen/homes/${name}/.clawizen/.privkey 2>/dev/null || true
-        mkdir -p /var/lib/clawizen/homes/${name}/.clawizen
         ln -sf /var/lib/clawizen/wallet.json /var/lib/clawizen/homes/${name}/.clawizen/wallet.json 2>/dev/null || true
+        ln -sf /var/lib/clawizen/.moltbook_key /var/lib/clawizen/homes/${name}/.clawizen/.moltbook_key 2>/dev/null || true
         ln -sf /var/lib/clawizen/.subzeroclaw/config /var/lib/clawizen/homes/${name}/.subzeroclaw/config 2>/dev/null || true
       '';
       ExecStart = "/var/lib/clawizen/subzeroclaw/subzeroclaw \"${prompt}\"";
@@ -85,7 +86,24 @@ in
     name = "earner";
     description = "Clawizen Earner — molly.fun campaign agent";
     skill = "molly/earner.md";
-    prompt = "Browse active molly.fun campaigns, submit content, and track rewards.";
+    prompt = "Browse active molly.fun campaigns, create a MoltBook post, submit it, and track rewards.";
+  };
+
+  systemd.services.clawizen-moltbook = mkClawService {
+    name = "moltbook";
+    description = "Clawizen MoltBook — social presence heartbeat";
+    skill = "molly/moltbook.md";
+    prompt = "Run the MoltBook social heartbeat: check DMs, browse feed, engage with posts, build karma.";
+    type = "oneshot";
+  };
+
+  systemd.timers.clawizen-moltbook = {
+    description = "Run MoltBook social heartbeat every 30 minutes";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "*-*-* *:00/30:00";
+      Persistent = true;
+    };
   };
 
   # ── mergeproof ─────────────────────────────────────

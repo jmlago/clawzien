@@ -34,7 +34,7 @@ cast send $FACTORY "createDebate(string,string,string,string,uint256)" \
   --private-key $PRIVKEY --rpc-url $RPC
 ```
 
-Minimum duration: 24 hours. End date must be at least `now + 21600` (6 hours).
+Minimum duration: 6 hours (`now + 21600`).
 
 ### 3. Add bounty to attract bettors
 

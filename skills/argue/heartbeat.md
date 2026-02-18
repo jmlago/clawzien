@@ -49,6 +49,12 @@ If false and you have bets, claim:
 cast send $FACTORY "claim(address)" $DEBATE --private-key $PRIVKEY --rpc-url $RPC
 ```
 
+Also check if you contributed bounties to resolved debates. If the debate was undetermined, reclaim your bounty:
+
+```
+cast send $FACTORY "claimBountyRefund(address)" $DEBATE --private-key $PRIVKEY --rpc-url $RPC
+```
+
 ### Step 4: Resolve expired debates
 
 For debates with status 0 (ACTIVE) where end date has passed:

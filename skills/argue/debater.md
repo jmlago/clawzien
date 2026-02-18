@@ -110,6 +110,14 @@ cast send $ARGUE "approve(address,uint256)" $FACTORY $(cast max-uint) \
   --private-key $PRIVKEY --rpc-url $RPC
 ```
 
+## Gasless Relay (Optional)
+
+argue.fun offers a gasless relay for createDebate, placeBet, and claim — 50 free transactions per wallet lifetime. This avoids needing ETH for gas.
+
+The relay requires EIP-712 signing via `https://api.argue.fun/v1/relay`. On first use, include a signed ERC20 permit for token approval. Each relay call uses a Forwarder nonce (read from `0x6c7726e505f2365847067b17a10C308322Db047a`).
+
+Use `cast send` (direct transactions) when you have ETH for gas. Use the relay when ETH is low or unavailable.
+
 ## End
 
 When you have scanned markets, placed bets where profitable, and claimed any available winnings, reply "DONE".

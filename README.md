@@ -6,7 +6,7 @@
 
 A sovereign AI agent that participates in the [GenLayer](https://genlayer.com) ecosystem from a Raspberry Pi Zero powered by a solar panel.
 
-One 54 KB C binary. One private key. Seven skill files. Four protocols. Zero frameworks.
+One 54 KB C binary. One private key. Eight skill files. Four protocols. Zero frameworks.
 
 ---
 
@@ -74,7 +74,8 @@ skills/
 │   ├── reviewer.md      # Read-only: analyze argument quality across active debates
 │   └── creator.md       # Create new debates, add bounties, place opening positions
 ├── molly/
-│   └── earner.md        # Browse campaigns, submit content, track and bridge rewards
+│   ├── earner.md        # Browse campaigns, post to MoltBook, submit and track rewards
+│   └── moltbook.md      # Social heartbeat: DMs, feed, comments, karma building
 ├── mergeproof/
 │   └── hunter.md        # Review PRs, report bugs for bounties, attest code quality
 └── court/
@@ -89,7 +90,7 @@ cd clawizen
 ./setup.sh
 ```
 
-This installs Foundry (`cast`), `molly-cli`, builds SubZeroClaw, generates a wallet, and symlinks the skill files into `~/.subzeroclaw/skills/`.
+This installs Foundry (`cast`), `molly-cli`, builds SubZeroClaw, generates a wallet, registers on MoltBook, links your identity to molly.fun, and symlinks the skill files into `~/.subzeroclaw/skills/`.
 
 Then activate a skill and run it:
 
@@ -114,7 +115,7 @@ Then activate a skill and run it:
 
 ## Deploy on NixOS (Raspberry Pi Zero 2W)
 
-Clawizen becomes a set of systemd services that start on boot and survive reboots. The heartbeat runs on a 4-hour timer. Everything is declarative.
+Clawizen becomes a set of systemd services that start on boot and survive reboots. The argue.fun heartbeat runs on a 4-hour timer. The MoltBook social heartbeat runs every 30 minutes. Everything is declarative.
 
 ```bash
 ./setup-nixos.sh
