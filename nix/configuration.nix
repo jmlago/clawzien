@@ -1,5 +1,42 @@
 { config, pkgs, ... }:
 
+let
+  # SubZeroClaw loads all .md files from $HOME/.subzeroclaw/skills/ into the
+  # system prompt. Each service gets its own HOME so it loads only its own skill.
+  # The text prompt passed as argv[1] kicks off the agentic loop.
+
+  mkClawService = { name, description, skill, prompt, enabled ? false, type ? "simple" }: {
+    inherit description;
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    ${if enabled then "wantedBy" else null} = [ "multi-user.target" ];
+    ${if !enabled then "enable" else null} = false;
+
+    environment = {
+      HOME = "/var/lib/clawizen/homes/${name}";
+    };
+
+    serviceConfig = {
+      Type = type;
+      ExecStartPre = pkgs.writeShellScript "clawizen-${name}-prep" ''
+        mkdir -p /var/lib/clawizen/homes/${name}/.subzeroclaw/skills
+        rm -f /var/lib/clawizen/homes/${name}/.subzeroclaw/skills/*.md
+        ln -sf /var/lib/clawizen/skills/${skill} /var/lib/clawizen/homes/${name}/.subzeroclaw/skills/skill.md
+        # Share wallet and config
+        ln -sf /var/lib/clawizen/.privkey /var/lib/clawizen/homes/${name}/.clawizen/.privkey 2>/dev/null || true
+        mkdir -p /var/lib/clawizen/homes/${name}/.clawizen
+        ln -sf /var/lib/clawizen/wallet.json /var/lib/clawizen/homes/${name}/.clawizen/wallet.json 2>/dev/null || true
+        ln -sf /var/lib/clawizen/.subzeroclaw/config /var/lib/clawizen/homes/${name}/.subzeroclaw/config 2>/dev/null || true
+      '';
+      ExecStart = "/var/lib/clawizen/subzeroclaw/subzeroclaw \"${prompt}\"";
+      Restart = if type == "simple" then "always" else "no";
+      RestartSec = 10;
+      DynamicUser = true;
+      StateDirectory = "clawizen";
+      WorkingDirectory = "/var/lib/clawizen";
+    };
+  };
+in
 {
   # System basics
   networking.hostName = "clawizen";
@@ -17,45 +54,20 @@
 
   # ── argue.fun ──────────────────────────────────────
 
-  # Debater — scans markets, places bets (daemon)
-  systemd.services.clawizen-debater = {
+  systemd.services.clawizen-debater = mkClawService {
+    name = "debater";
     description = "Clawizen Debater — argue.fun autonomous agent";
-    after = [ "network-online.target" ];
-    wants = [ "network-online.target" ];
-    wantedBy = [ "multi-user.target" ];
-
-    environment = {
-      HOME = "/var/lib/clawizen";
-    };
-
-    serviceConfig = {
-      Type = "simple";
-      ExecStart = "/var/lib/clawizen/subzeroclaw/subzeroclaw /var/lib/clawizen/skills/argue/debater.md";
-      Restart = "always";
-      RestartSec = 10;
-      DynamicUser = true;
-      StateDirectory = "clawizen";
-      WorkingDirectory = "/var/lib/clawizen";
-    };
+    skill = "argue/debater.md";
+    prompt = "Scan active debates on argue.fun and place profitable bets. Loop continuously.";
+    enabled = true;
   };
 
-  # Heartbeat — claims winnings, resolves expired debates (timer)
-  systemd.services.clawizen-heartbeat = {
+  systemd.services.clawizen-heartbeat = mkClawService {
+    name = "heartbeat";
     description = "Clawizen Heartbeat — argue.fun periodic check-in";
-    after = [ "network-online.target" ];
-    wants = [ "network-online.target" ];
-
-    environment = {
-      HOME = "/var/lib/clawizen";
-    };
-
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "/var/lib/clawizen/subzeroclaw/subzeroclaw /var/lib/clawizen/skills/argue/heartbeat.md";
-      DynamicUser = true;
-      StateDirectory = "clawizen";
-      WorkingDirectory = "/var/lib/clawizen";
-    };
+    skill = "argue/heartbeat.md";
+    prompt = "Run the 4-hour heartbeat routine: check balances, claim winnings, resolve expired debates, scan opportunities.";
+    type = "oneshot";
   };
 
   systemd.timers.clawizen-heartbeat = {
@@ -69,81 +81,34 @@
 
   # ── molly.fun ──────────────────────────────────────
 
-  # Earner — browses campaigns, submits content (disabled by default)
-  systemd.services.clawizen-earner = {
+  systemd.services.clawizen-earner = mkClawService {
+    name = "earner";
     description = "Clawizen Earner — molly.fun campaign agent";
-    after = [ "network-online.target" ];
-    wants = [ "network-online.target" ];
-    enable = false;
-
-    environment = {
-      HOME = "/var/lib/clawizen";
-    };
-
-    serviceConfig = {
-      Type = "simple";
-      ExecStart = "/var/lib/clawizen/subzeroclaw/subzeroclaw /var/lib/clawizen/skills/molly/earner.md";
-      Restart = "always";
-      RestartSec = 10;
-      DynamicUser = true;
-      StateDirectory = "clawizen";
-      WorkingDirectory = "/var/lib/clawizen";
-    };
+    skill = "molly/earner.md";
+    prompt = "Browse active molly.fun campaigns, submit content, and track rewards.";
   };
 
   # ── mergeproof ─────────────────────────────────────
 
-  # Hunter — reviews PRs, finds bugs (disabled by default)
-  systemd.services.clawizen-hunter = {
+  systemd.services.clawizen-hunter = mkClawService {
+    name = "hunter";
     description = "Clawizen Hunter — mergeproof code reviewer";
-    after = [ "network-online.target" ];
-    wants = [ "network-online.target" ];
-    enable = false;
-
-    environment = {
-      HOME = "/var/lib/clawizen";
-    };
-
-    serviceConfig = {
-      Type = "simple";
-      ExecStart = "/var/lib/clawizen/subzeroclaw/subzeroclaw /var/lib/clawizen/skills/mergeproof/hunter.md";
-      Restart = "always";
-      RestartSec = 10;
-      DynamicUser = true;
-      StateDirectory = "clawizen";
-      WorkingDirectory = "/var/lib/clawizen";
-    };
+    skill = "mergeproof/hunter.md";
+    prompt = "Review open mergeproof bounties, find bugs, and attest code quality.";
   };
 
   # ── Internet Court ─────────────────────────────────
 
-  # Litigant — files disputes, submits evidence (disabled by default)
-  systemd.services.clawizen-litigant = {
+  systemd.services.clawizen-litigant = mkClawService {
+    name = "litigant";
     description = "Clawizen Litigant — Internet Court dispute agent";
-    after = [ "network-online.target" ];
-    wants = [ "network-online.target" ];
-    enable = false;
-
-    environment = {
-      HOME = "/var/lib/clawizen";
-    };
-
-    serviceConfig = {
-      Type = "simple";
-      ExecStart = "/var/lib/clawizen/subzeroclaw/subzeroclaw /var/lib/clawizen/skills/court/litigant.md";
-      Restart = "always";
-      RestartSec = 10;
-      DynamicUser = true;
-      StateDirectory = "clawizen";
-      WorkingDirectory = "/var/lib/clawizen";
-    };
+    skill = "court/litigant.md";
+    prompt = "Check for active disputes, file cases, submit evidence, and collect verdicts.";
   };
 
   # SSH access
   services.openssh.enable = true;
 
-  # Auto-upgrade (optional — pulls latest config on reboot)
   system.autoUpgrade.enable = false;
-
   system.stateVersion = "24.11";
 }

@@ -19,13 +19,20 @@ echo "Building SubZeroClaw..."
 cd subzeroclaw && make && cd ..
 
 # 4. Create wallet if needed
-if [ ! -f "/var/lib/clawizen/private-key" ]; then
+if [ ! -f "/var/lib/clawizen/.privkey" ]; then
     echo "Generating wallet..."
     sudo mkdir -p /var/lib/clawizen
-    nix-shell -p foundry-bin --run "cast wallet new --json" | sudo tee /var/lib/clawizen/wallet.json > /dev/null
-    sudo jq -r '.private_key' /var/lib/clawizen/wallet.json | sudo tee /var/lib/clawizen/private-key > /dev/null
-    echo "Wallet created! Address: $(sudo jq -r '.address' /var/lib/clawizen/wallet.json)"
-    echo "Fund it: https://genlayer-faucet.vercel.app"
+
+    WALLET_OUTPUT=$(nix-shell -p foundry-bin --run "cast wallet new")
+    PRIVATE_KEY=$(echo "$WALLET_OUTPUT" | grep "Private key:" | awk '{print $3}')
+    ADDRESS=$(echo "$WALLET_OUTPUT" | grep "Address:" | awk '{print $2}')
+
+    echo "$PRIVATE_KEY" | sudo tee /var/lib/clawizen/.privkey > /dev/null
+    sudo chmod 600 /var/lib/clawizen/.privkey
+    echo "{\"address\": \"$ADDRESS\"}" | sudo tee /var/lib/clawizen/wallet.json > /dev/null
+
+    echo "Wallet created: $ADDRESS"
+    echo "Fund it on Base (argue.fun) and GenLayer (molly.fun)"
 fi
 
 # 5. Deploy files
@@ -48,5 +55,11 @@ echo ""
 echo "Or if using flakes:"
 echo "  sudo nixos-rebuild switch --flake .#clawizen"
 echo ""
-echo "Clawizen will start automatically as a systemd service."
+echo "Services:"
+echo "  clawizen-debater   — argue.fun debater (enabled, auto-starts)"
+echo "  clawizen-heartbeat — argue.fun heartbeat (timer, every 4 hours)"
+echo "  clawizen-earner    — molly.fun earner (disabled, enable in config)"
+echo "  clawizen-hunter    — mergeproof reviewer (disabled)"
+echo "  clawizen-litigant  — Internet Court (disabled)"
+echo ""
 echo "Check status: systemctl status clawizen-debater"

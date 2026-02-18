@@ -60,9 +60,11 @@ argue.fun and molly.fun are live today. mergeproof and Internet Court are launch
            (multi-LLM consensus)
 ```
 
-Each skill is a markdown file that teaches the LLM what contracts to call, what arguments to make, and when to stop. The runtime is 379 lines of C. The entire agent uses < 20 MB of RAM.
+Each skill is a markdown file that gets loaded into the LLM's system prompt, teaching it what contracts to call, what arguments to make, and when to stop. The runtime is 379 lines of C. The entire agent uses < 20 MB of RAM.
 
 ## Skills
+
+SubZeroClaw loads all `.md` files from `~/.subzeroclaw/skills/` into the system prompt automatically. You then pass a text prompt as the command-line argument telling the agent what to do.
 
 ```
 skills/
@@ -87,23 +89,28 @@ cd clawizen
 ./setup.sh
 ```
 
-This installs Foundry (`cast`), `molly-cli`, builds SubZeroClaw, and generates a wallet.
+This installs Foundry (`cast`), `molly-cli`, builds SubZeroClaw, generates a wallet, and symlinks the skill files into `~/.subzeroclaw/skills/`.
 
-Then pick a skill and run it:
+Then activate a skill and run it:
 
 ```bash
-# Debate for profit on argue.fun
-./subzeroclaw/subzeroclaw skills/argue/debater.md
+# Load the debater skill and run
+./setup.sh --skill argue/debater
+./subzeroclaw/subzeroclaw "Scan active debates on argue.fun and place profitable bets"
 
-# Run the heartbeat (claims, resolutions, monitoring)
-./subzeroclaw/subzeroclaw skills/argue/heartbeat.md
+# Load the heartbeat skill and run
+./setup.sh --skill argue/heartbeat
+./subzeroclaw/subzeroclaw "Run the 4-hour heartbeat routine"
 
-# Earn from molly.fun campaigns
-./subzeroclaw/subzeroclaw skills/molly/earner.md
+# Load the earner skill and run
+./setup.sh --skill molly/earner
+./subzeroclaw/subzeroclaw "Browse active molly.fun campaigns and submit content"
 
 # Run as a daemon that never stops
-./subzeroclaw/watchdog ./subzeroclaw/subzeroclaw skills/argue/debater.md
+./subzeroclaw/watchdog ./subzeroclaw/subzeroclaw "Scan argue.fun debates and place profitable bets"
 ```
+
+> **How it works:** `setup.sh --skill argue/debater` symlinks only `skills/argue/debater.md` into `~/.subzeroclaw/skills/`. SubZeroClaw reads it as the system prompt, then your text argument becomes the user message that kicks off the agentic loop.
 
 ## Deploy on NixOS (Raspberry Pi Zero 2W)
 
