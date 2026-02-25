@@ -4,7 +4,7 @@
 
 # Clawizen — The Minimum Viable GenLayer Citizen
 
-The cheapest possible way to participate in the [GenLayer](https://genlayer.com) ecosystem. A 54 KB C runtime, a private key, and a set of markdown skill files — running on a Raspberry Pi Zero powered by a solar panel.
+The cheapest possible way to participate in the [GenLayer](https://genlayer.com) ecosystem. A 54 KB C runtime, a private key, and a set of markdown skill files — running on a Raspberry Pi Zero powered by a solar panel, or [in your browser](#browser-runtime).
 
 ---
 
@@ -23,6 +23,7 @@ The result: a sovereign citizen that runs on 512 MB of RAM and sunlight.
 ```
 ┌─────────────────────────────────────────────────┐
 │  Raspberry Pi Zero 2W  (512 MB RAM, WiFi, <1.5W)│
+│          — or any browser via WASM —            │
 │                                                 │
 │  SubZeroClaw (54 KB, 379 lines of C)            │
 │  ┌────────────────────────────────────────────┐ │
@@ -135,6 +136,37 @@ See [`contracts/addresses.env`](contracts/addresses.env) for the full list. Key 
 | argue.fun | $ARGUE | `0x7FFd8f91b0b1b5c7A2E6c7c9efB8Be0A71885b07` |
 | molly.fun | CampaignFactory | `0x0F78AEd50d0BC19b97b7c2ba0e03ed583F9DD58E` |
 | molly.fun | MoltBookID | `0xB32bf752d735576AE6f93AF27A529b240b3D4104` |
+
+## Browser Runtime
+
+The same SubZeroClaw C code runs in the browser — zero changes to the runtime. Emscripten compiles it to WASM, and a custom `popen()` override routes calls at link time:
+
+- **LLM API calls** (curl) → browser `fetch()`
+- **Shell commands** (cast, molly-cli, jq) → [WebContainers](https://webcontainers.io) (Node.js in the browser)
+- **cast** → replaced by a viem-based shim (~200 lines)
+
+```bash
+cd web
+npm install
+./build-wasm.sh    # requires emscripten (emsdk)
+npm run dev        # http://localhost:5173
+```
+
+Fill in your OpenRouter API key, pick a skill, type a prompt, and click Run. The agent loop executes entirely in the browser — no server, no backend.
+
+```
+web/
+├── build-wasm.sh          # emcc compiles subzeroclaw → WASM
+├── src/
+│   ├── library_popen.js   # popen()/pclose() override (the entire bridge)
+│   ├── main.ts            # Boot: WebContainers → WASM → wire together
+│   ├── webcontainer.ts    # Shell execution runtime
+│   └── shims/
+│       ├── cast.ts        # viem-based Foundry cast replacement
+│       ├── curl.ts        # fetch-based curl
+│       └── jq.ts          # Minimal jq
+└── public/                # WASM build output (gitignored)
+```
 
 ## Contributing
 

@@ -6,3 +6,7 @@ subzeroclaw/subzeroclaw
 .moltbook_key
 wallet.json
 state.json
+
+# Web build artifacts
+web/public/subzeroclaw.js
+web/public/subzeroclaw.wasm

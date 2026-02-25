@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clawzien</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      background: #0a0a14;
+      color: #c8c8d4;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      border-bottom: 1px solid #1e1e30;
+      background: #0e0e1a;
+    }
+    header h1 { font-size: 16px; font-weight: 600; color: #e0e0f0; }
+    #status {
+      font-size: 12px;
+      padding: 2px 10px;
+      border-radius: 10px;
+      background: #1a1a2e;
+      color: #888;
+    }
+    #status.ready { background: #0a2a1a; color: #4ade80; }
+    #status.running { background: #2a1a0a; color: #fbbf24; }
+    #status.error { background: #2a0a0a; color: #f87171; }
+    .main {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+    .panel {
+      width: 320px;
+      min-width: 280px;
+      padding: 16px;
+      border-right: 1px solid #1e1e30;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: #0c0c18;
+    }
+    .panel label {
+      display: block;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+    .panel input, .panel select, .panel textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #1e1e30;
+      border-radius: 6px;
+      background: #121220;
+      color: #c8c8d4;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+    .panel input:focus, .panel select:focus, .panel textarea:focus {
+      border-color: #3b3b5c;
+    }
+    .panel textarea { resize: vertical; min-height: 60px; }
+    .field { display: flex; flex-direction: column; }
+    .actions { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #btn-run {
+      background: #3b82f6;
+      color: white;
+    }
+    #btn-stop {
+      background: #ef4444;
+      color: white;
+    }
+    .terminal-wrap {
+      flex: 1;
+      min-width: 0;
+      padding: 8px;
+      background: #0a0a14;
+    }
+    #terminal {
+      height: 100%;
+      width: 100%;
+    }
+    @media (max-width: 700px) {
+      .main { flex-direction: column; }
+      .panel { width: 100%; border-right: none; border-bottom: 1px solid #1e1e30; max-height: 40vh; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Clawzien</h1>
+    <span id="status">Initializing...</span>
+  </header>
+  <div class="main">
+    <div class="panel">
+      <div class="field">
+        <label>API Key (OpenRouter)</label>
+        <input type="password" id="api-key" placeholder="sk-or-..." />
+      </div>
+      <div class="field">
+        <label>Model</label>
+        <input type="text" id="model" value="anthropic/claude-sonnet-4-20250514" />
+      </div>
+      <div class="field">
+        <label>Endpoint</label>
+        <input type="text" id="endpoint" value="https://openrouter.ai/api/v1/chat/completions" />
+      </div>
+      <div class="field">
+        <label>Skill</label>
+        <select id="skill"></select>
+      </div>
+      <div class="field">
+        <label>Private Key (optional)</label>
+        <input type="password" id="privkey" placeholder="0x..." />
+      </div>
+      <div class="field">
+        <label>MoltBook Key (optional)</label>
+        <input type="password" id="moltbook-key" placeholder="Bearer token" />
+      </div>
+      <div class="field">
+        <label>Prompt</label>
+        <textarea id="prompt" rows="3" placeholder="e.g. scan active debates"></textarea>
+      </div>
+      <div class="actions">
+        <button id="btn-run" disabled>Run</button>
+        <button id="btn-stop" disabled style="display:none">Stop</button>
+      </div>
+    </div>
+    <div class="terminal-wrap">
+      <div id="terminal"></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
