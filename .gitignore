@@ -8,5 +8,7 @@ wallet.json
 state.json
 
 # Web build artifacts
-web/public/subzeroclaw.js
-web/public/subzeroclaw.wasm
+web/public/clawzien-vm.ext2
+web/bin/cast-i686
+web/dist/
+web/.env

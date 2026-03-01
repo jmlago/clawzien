@@ -1,0 +1,46 @@
+# CheerpX VM image: Debian i386 with subzeroclaw + tools
+# Build: ./build-image.sh
+# Output: web/public/clawzien-vm.ext2
+
+FROM --platform=linux/386 i386/debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libc-dev make jq ca-certificates bash coreutils grep sed gawk curl tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+# Compile subzeroclaw natively for i386
+COPY subzeroclaw/src/subzeroclaw.c subzeroclaw/src/cJSON.c subzeroclaw/src/cJSON.h /build/
+RUN mkdir -p /build/cjson && cp /build/cJSON.h /build/cjson/ \
+    && cd /build && gcc -Wall -O2 -std=c11 -D_GNU_SOURCE -I/build \
+    subzeroclaw.c cJSON.c -o /usr/local/bin/subzeroclaw -lm \
+    && rm -rf /build
+
+# Install bridge wrapper scripts (curl and cast go through browser fetch)
+COPY web/vm-scripts/curl-bridge.sh /usr/local/bin/curl-bridge
+COPY web/vm-scripts/cast-bridge.sh /usr/local/bin/cast
+
+# The real curl stays available as /usr/bin/curl for non-bridged use.
+# curl-bridge replaces the default curl in PATH via a wrapper:
+RUN mv /usr/bin/curl /usr/bin/curl-real \
+    && ln -sf /usr/local/bin/curl-bridge /usr/bin/curl
+
+RUN chmod +x /usr/local/bin/curl-bridge /usr/local/bin/cast /usr/local/bin/subzeroclaw
+
+# If a pre-compiled cast binary for i686 exists, install it
+COPY web/bin/ /tmp/cast-bin/
+RUN if [ -f /tmp/cast-bin/cast-i686 ]; then \
+      cp /tmp/cast-bin/cast-i686 /usr/local/bin/cast-native && \
+      chmod +x /usr/local/bin/cast-native; \
+    fi && rm -rf /tmp/cast-bin
+
+# Create directory structure
+RUN mkdir -p /root/.subzeroclaw/skills \
+             /root/.subzeroclaw/logs \
+             /root/.clawizen \
+             /tmp/bridge/requests \
+             /tmp/bridge/responses
+
+# Default environment
+ENV HOME=/root
+ENV TERM=xterm
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

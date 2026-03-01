@@ -23,7 +23,7 @@ The result: a sovereign citizen that runs on 512 MB of RAM and sunlight.
 ```
 ┌─────────────────────────────────────────────────┐
 │  Raspberry Pi Zero 2W  (512 MB RAM, WiFi, <1.5W)│
-│          — or any browser via WASM —            │
+│     — or any browser via CheerpX (WebVM) —      │
 │                                                 │
 │  SubZeroClaw (54 KB, 379 lines of C)            │
 │  ┌────────────────────────────────────────────┐ │
@@ -139,33 +139,61 @@ See [`contracts/addresses.env`](contracts/addresses.env) for the full list. Key 
 
 ## Browser Runtime
 
-The same SubZeroClaw C code runs in the browser — zero changes to the runtime. Emscripten compiles it to WASM, and a custom `popen()` override routes calls at link time:
+The same SubZeroClaw C code runs in the browser via [CheerpX](https://cheerpx.io) — a real x86 Linux VM in WebAssembly. No shims, no compromises: real `bash`, real `jq`, real `grep`, real pipes and loops. The agent gets a full Debian environment.
 
-- **LLM API calls** (curl) → browser `fetch()`
-- **Shell commands** (cast, molly-cli, jq) → [WebContainers](https://webcontainers.io) (Node.js in the browser)
-- **cast** → replaced by a viem-based shim (~200 lines)
+- **SubZeroClaw** runs as a native i386 binary inside the VM
+- **Shell commands** (jq, grep, sed, awk, sort, etc.) are real coreutils binaries
+- **curl** is bridged through browser `fetch()` via a file-based IPC protocol
+- **cast** (compute commands like `sig`, `keccak`) run natively; network commands bridge through viem in the browser
+- **Filesystem** persists across sessions via IndexedDB (config, keys, skills survive page reloads)
+- **Privy onboarding** — Google sign-in, auto-generated local wallet, card onramp via MoonPay
+
+### Two onboarding paths
+
+| Path | Flow |
+|------|------|
+| **Normie** | Google sign-in → auto-generated wallet → fund with card → run |
+| **Hacker** | Paste your own private key in Settings → run |
+
+Privy handles OAuth and the fiat onramp. The agent's private key is generated locally with viem and never leaves the browser.
+
+### Getting started
 
 ```bash
 cd web
+cp .env.example .env       # fill in API key, optionally Privy App ID
 npm install
-./build-wasm.sh    # requires emscripten (emsdk)
-npm run dev        # http://localhost:5173
+./build-image.sh            # builds Debian i386 ext2 image (requires Docker + e2fsprogs)
+npm run dev                 # http://localhost:5173
 ```
 
-Fill in your OpenRouter API key, pick a skill, type a prompt, and click Run. The agent loop executes entirely in the browser — no server, no backend.
+The landing page is at `/`, the app is at `/app/`. Pick a skill, type a prompt, and click Run. The agent loop executes entirely in the browser — no server, no backend. Click "Advanced" in the terminal header for a raw Linux shell.
+
+### File structure
 
 ```
 web/
-├── build-wasm.sh          # emcc compiles subzeroclaw → WASM
+├── index.html              # Landing page
+├── app/
+│   └── index.html          # App (terminal, skills, settings)
+├── Dockerfile.cheerpx      # Debian i386 image with subzeroclaw + tools
+├── build-image.sh          # Docker → ext2 image pipeline
+├── vm-scripts/
+│   ├── curl-bridge.sh      # curl replacement (file-based IPC → browser fetch)
+│   └── cast-bridge.sh      # cast wrapper (compute → native, network → bridge)
 ├── src/
-│   ├── library_popen.js   # popen()/pclose() override (the entire bridge)
-│   ├── main.ts            # Boot: WebContainers → WASM → wire together
-│   ├── webcontainer.ts    # Shell execution runtime
-│   └── shims/
-│       ├── cast.ts        # viem-based Foundry cast replacement
-│       ├── curl.ts        # fetch-based curl
-│       └── jq.ts          # Minimal jq
-└── public/                # WASM build output (gitignored)
+│   ├── main.ts             # Boot CheerpX VM → bridge → run agent
+│   ├── cheerpx.ts          # CheerpX lifecycle (boot, run, filesystem)
+│   ├── bridge.ts           # Browser-side IPC (polls VM for HTTP/cast requests)
+│   ├── cast-browser.ts     # cast commands via viem (used by bridge for network ops)
+│   ├── terminal.ts         # xterm.js (filtered agent output + raw Advanced mode)
+│   ├── config.ts           # Settings lifecycle (localStorage + VM filesystem)
+│   ├── privy.ts            # Privy SDK wrapper (Google OAuth, onramp)
+│   ├── wallet.ts           # Local wallet management (viem, localStorage)
+│   ├── editor.ts           # Markdown editor
+│   └── skills.ts           # Skill markdown loader
+└── public/
+    └── clawzien-vm.ext2    # VM disk image (gitignored, built by build-image.sh)
 ```
 
 ## Contributing

@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clawzien</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #080808;
+      --bg2: #0f0f0f;
+      --surface: #111111;
+      --fg: #e8e4dc;
+      --fg2: #6b6560;
+      --fg3: #4a4540;
+      --amber: #d4a843;
+      --amber-dim: #8a6a25;
+      --green: #5a8a5a;
+      --green-bg: #1a2a1a;
+      --red: #c45a5a;
+      --red-bg: #2a1515;
+      --border: #1e1e1e;
+      --font-mono: 'Geist Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
+    }
+
+    /* Thin dark scrollbar everywhere */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2a2a2a; }
+    * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+    body {
+      font-family: var(--font-mono);
+      background: var(--bg);
+      color: var(--fg);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header / Nav ────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 20px;
+      height: 44px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+      flex-shrink: 0;
+    }
+    header h1 {
+      font-size: 13px;
+      font-weight: 400;
+      letter-spacing: 0.12em;
+      color: var(--fg2);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    header h1 span { color: var(--amber); }
+    .nav {
+      display: flex;
+      gap: 0;
+      height: 100%;
+    }
+    .nav-btn {
+      padding: 0 14px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--fg2);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      height: 100%;
+      display: flex;
+      align-items: center;
+    }
+    .nav-btn:hover { color: var(--fg); }
+    .nav-btn.active {
+      color: var(--fg);
+      border-bottom-color: var(--amber);
+    }
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #status {
+      font-size: 11px;
+      padding: 2px 10px;
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--fg2);
+    }
+    #status.ready { background: var(--green-bg); color: var(--green); }
+    #status.running { background: #2a1a0a; color: var(--amber); }
+    #status.error { background: var(--red-bg); color: var(--red); }
+    .header-btn {
+      padding: 5px 14px;
+      border: none;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .header-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #btn-run { background: var(--amber); color: var(--bg); padding: 7px 22px; font-size: 13px; }
+    #btn-run:hover { background: #c49835; }
+    #btn-stop { background: var(--red); color: white; padding: 7px 22px; font-size: 13px; }
+    .btn-hint { font-size: 10px; opacity: 0.55; font-weight: 400; margin-left: 4px; }
+
+    /* ── Views (full screen, one visible at a time) ── */
+    .main {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .view {
+      display: none;
+      flex: 1;
+      min-height: 0;
+    }
+    .view.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Run view (terminal) ─────────────────────────── */
+    #view-run {
+      padding: 8px;
+      background: var(--bg);
+    }
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 2px 4px 6px;
+    }
+    .terminal-header .spacer { flex: 1; }
+    .cost-display {
+      font-size: 11px;
+      color: var(--fg2);
+      padding: 3px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .cost-display:empty { display: none; }
+    .cost-session { color: var(--fg3); border-style: dashed; }
+    .run-timer { color: var(--amber); }
+    .terminal-header button {
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--surface);
+      color: var(--fg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+    }
+    .terminal-header button:hover { color: var(--fg); border-color: #2a2a2a; }
+    .terminal-header button.copied { color: var(--green); border-color: var(--green); }
+    #terminal { flex: 1; width: 100%; min-height: 0; }
+    #raw-terminal { flex: 1; width: 100%; min-height: 0; display: none; }
+    .terminal-header .toggle-advanced {
+      font-size: 11px;
+      padding: 3px 8px;
+      background: var(--surface);
+      color: var(--fg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--font-mono);
+    }
+    .terminal-header .toggle-advanced:hover { color: var(--fg); border-color: #2a2a2a; }
+    .terminal-header .toggle-advanced.active { color: var(--amber); border-color: var(--amber); }
+
+    /* ── Skills / Settings views (form) ──────────────── */
+    .form-view {
+      padding: 24px;
+      overflow-y: auto;
+      gap: 16px;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .form-view label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--fg2);
+      margin-bottom: 4px;
+    }
+    .form-view input, .form-view select, .form-view textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--fg);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      outline: none;
+    }
+    .form-view input:focus, .form-view select:focus, .form-view textarea:focus {
+      border-color: var(--amber-dim);
+    }
+    .form-view textarea {
+      resize: vertical;
+      min-height: 60px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .field { display: flex; flex-direction: column; }
+
+    /* ── Secret field ────────────────────────────────── */
+    .secret-wrap {
+      display: flex;
+      gap: 4px;
+    }
+    .secret-wrap input {
+      flex: 1;
+      min-width: 0;
+    }
+    .secret-btn {
+      width: 32px;
+      height: 34px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--fg3);
+      cursor: pointer;
+      font-size: 14px;
+      flex-shrink: 0;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .secret-btn:hover { color: var(--fg); border-color: #2a2a2a; }
+    .secret-btn.copied { color: var(--green); }
+
+    /* ── Wallet toggle ──────────────────────────────── */
+    .wallet-toggle {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      width: fit-content;
+    }
+    .toggle-btn {
+      padding: 6px 16px;
+      background: var(--surface);
+      border: none;
+      color: var(--fg2);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .toggle-btn:not(:last-child) { border-right: 1px solid var(--border); }
+    .toggle-btn:hover { color: var(--fg); }
+    .toggle-btn.active { background: #1a1a1a; color: var(--fg); }
+
+    .privy-btn {
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--fg);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .privy-btn:hover { border-color: #2a2a2a; }
+    .fund-btn { background: var(--green-bg); color: var(--green); border-color: #1a3a2a; }
+    .fund-btn:hover { border-color: var(--green); }
+    .logout-btn { color: var(--fg2); font-size: 12px; font-weight: 400; }
+    .wallet-address {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 0;
+      font-size: 13px;
+      color: var(--fg);
+      word-break: break-all;
+    }
+    #privy-wallet-info {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .env-hint {
+      font-size: 11px;
+      color: var(--fg3);
+      line-height: 1.5;
+      padding: 8px 10px;
+      background: var(--bg);
+      border-radius: 6px;
+      border: 1px dashed var(--border);
+    }
+
+    /* ── Skills view (3-column layout) ──────────────── */
+    #view-skills { padding: 16px; }
+    .skills-columns {
+      display: flex;
+      gap: 16px;
+      flex: 1;
+      min-height: 0;
+    }
+    .skills-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .skills-col > label,
+    .skills-col-header > label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--fg2);
+      margin-bottom: 0;
+      flex-shrink: 0;
+    }
+    .skills-col > label { margin-bottom: 4px; }
+    .skills-col-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      flex-shrink: 0;
+    }
+    .skills-col-header select {
+      padding: 2px 6px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--fg);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      outline: none;
+    }
+    .skills-col-header select:focus { border-color: var(--amber-dim); }
+    .skills-col > textarea {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--fg);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      outline: none;
+      resize: none;
+    }
+    .skills-col > textarea:focus { border-color: var(--amber-dim); }
+
+    /* ── Markdown editor (textarea + highlighted pre overlay) ── */
+    .editor-wrap {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .editor-backdrop {
+      position: absolute;
+      inset: 0;
+      overflow: auto;
+      pointer-events: none;
+    }
+    .editor-highlights {
+      margin: 0;
+      padding: 8px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--fg);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .editor-textarea {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      padding: 8px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      background: transparent;
+      color: transparent;
+      caret-color: var(--fg);
+      border: none;
+      outline: none;
+      resize: none;
+      overflow: auto;
+    }
+    .editor-textarea::selection { background: rgba(212, 168, 67, 0.2); }
+
+    /* ── Markdown syntax colors ─────────────────────── */
+    .md-heading { color: var(--amber); font-weight: 600; }
+    .md-fence { color: var(--fg2); }
+    .md-code-block { color: #c8b890; }
+    .md-code { color: #c8b890; }
+    .md-bold { color: var(--fg); font-weight: 700; }
+    .md-list { color: var(--amber); }
+    .md-quote { color: var(--fg2); font-style: italic; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Claw<span>zien</span></h1>
+    <nav class="nav">
+      <button class="nav-btn active" data-view="run">Terminal</button>
+      <button class="nav-btn" data-view="skills">Skills</button>
+      <button class="nav-btn" data-view="settings">Settings</button>
+    </nav>
+    <div class="header-right">
+      <span id="status">Initializing...</span>
+      <button class="header-btn" id="btn-run" disabled>Run <span class="btn-hint">Ctrl+Enter</span></button>
+      <button class="header-btn" id="btn-stop" disabled style="display:none">Stop</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- Terminal view -->
+    <div class="view active" id="view-run">
+      <div class="terminal-header">
+        <span id="run-timer" class="cost-display run-timer"></span>
+        <span id="cost-run" class="cost-display"></span>
+        <span id="cost-session" class="cost-display cost-session"></span>
+        <div class="spacer"></div>
+        <button id="btn-toggle-advanced" class="toggle-advanced">Advanced</button>
+        <button id="btn-copy-term">Copy terminal</button>
+      </div>
+      <div id="terminal"></div>
+      <div id="raw-terminal"></div>
+    </div>
+
+    <!-- Skills view: 3-column layout -->
+    <div class="view" id="view-skills">
+      <div class="skills-columns">
+        <div class="skills-col">
+          <label>Prompt</label>
+          <textarea id="prompt" placeholder="e.g. scan active debates" spellcheck="false"></textarea>
+        </div>
+        <div class="skills-col">
+          <label>Environment</label>
+          <div id="editor-env"></div>
+        </div>
+        <div class="skills-col">
+          <div class="skills-col-header">
+            <label id="skill-content-label">Skill</label>
+            <select id="skill"></select>
+          </div>
+          <div id="editor-skill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings view: model, endpoint, keys -->
+    <div class="view form-view" id="view-settings">
+      <div class="field">
+        <label>Model</label>
+        <input type="text" id="model" />
+      </div>
+      <div class="field">
+        <label>Endpoint</label>
+        <input type="text" id="endpoint" />
+      </div>
+      <div class="field">
+        <label>API Key (OpenRouter)</label>
+        <div class="secret-wrap">
+          <input type="password" id="api-key" placeholder="sk-or-..." />
+          <button class="secret-btn" data-action="toggle" data-target="api-key" title="Show/hide">&#x1f441;</button>
+          <button class="secret-btn" data-action="copy" data-target="api-key" title="Copy">&#x2398;</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Wallet</label>
+        <div class="wallet-toggle">
+          <button id="wallet-mode-manual" class="toggle-btn active">Manual</button>
+          <button id="wallet-mode-privy" class="toggle-btn">Sign in</button>
+        </div>
+      </div>
+      <!-- Manual mode (existing privkey input) -->
+      <div id="wallet-manual" class="field">
+        <div class="secret-wrap">
+          <input type="password" id="privkey" placeholder="0x..." />
+          <button class="secret-btn" data-action="toggle" data-target="privkey" title="Show/hide">&#x1f441;</button>
+          <button class="secret-btn" data-action="copy" data-target="privkey" title="Copy">&#x2398;</button>
+        </div>
+      </div>
+      <!-- Privy mode (sign-in + auto wallet + fund) -->
+      <div id="wallet-privy" class="field" style="display:none">
+        <button id="btn-privy-login" class="privy-btn">Sign in with Google</button>
+        <div id="privy-wallet-info" style="display:none">
+          <div class="wallet-address">
+            <span id="wallet-addr">0x...</span>
+            <button class="secret-btn" data-action="copy-text" data-target="wallet-addr" title="Copy">&#x2398;</button>
+          </div>
+          <button id="btn-fund" class="privy-btn fund-btn">Fund wallet</button>
+          <button id="btn-privy-logout" class="privy-btn logout-btn">Sign out</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>MoltBook Key</label>
+        <div class="secret-wrap">
+          <input type="password" id="moltbook-key" placeholder="Bearer token" />
+          <button class="secret-btn" data-action="toggle" data-target="moltbook-key" title="Show/hide">&#x1f441;</button>
+          <button class="secret-btn" data-action="copy" data-target="moltbook-key" title="Copy">&#x2398;</button>
+        </div>
+      </div>
+      <div class="env-hint">
+        Pre-populate from <code>web/.env</code>:<br>
+        <code>VITE_API_KEY="sk-or-..."</code><br>
+        <code>VITE_PRIVKEY="0x..."</code><br>
+        <code>VITE_MOLTBOOK_KEY="..."</code>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* Nav switching */
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('view-' + btn.dataset.view).classList.add('active');
+      });
+    });
+
+    /* Eye toggle (show/hide) */
+    document.querySelectorAll('[data-action="toggle"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = document.getElementById(btn.dataset.target);
+        if (input.type === 'password') {
+          input.type = 'text';
+          btn.style.color = '#e8e4dc';
+        } else {
+          input.type = 'password';
+          btn.style.color = '';
+        }
+      });
+    });
+
+    /* Copy button (input value) */
+    document.querySelectorAll('[data-action="copy"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = document.getElementById(btn.dataset.target);
+        navigator.clipboard.writeText(input.value).then(() => {
+          btn.classList.add('copied');
+          btn.innerHTML = '&#x2713;';
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.innerHTML = '&#x2398;';
+          }, 1500);
+        });
+      });
+    });
+
+    /* Copy button (text content) */
+    document.querySelectorAll('[data-action="copy-text"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const el = document.getElementById(btn.dataset.target);
+        navigator.clipboard.writeText(el.textContent).then(() => {
+          btn.classList.add('copied');
+          btn.innerHTML = '&#x2713;';
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.innerHTML = '&#x2398;';
+          }, 1500);
+        });
+      });
+    });
+  </script>
+  <script type="module" src="../src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CheerpX PoC — Clawzien</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'SF Mono', Menlo, Consolas, monospace;
+      background: #0a0a14;
+      color: #c8c8d4;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 12px 20px;
+      border-bottom: 1px solid #1e1e30;
+      background: #0e0e1a;
+    }
+    header h1 { font-size: 14px; font-weight: 600; color: #e0e0f0; }
+    #log {
+      padding: 12px 20px;
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-y: auto;
+      flex: 0 0 auto;
+      max-height: 40vh;
+      background: #0e0e1a;
+      border-bottom: 1px solid #1e1e30;
+    }
+    .log-ok { color: #4ade80; }
+    .log-err { color: #f87171; }
+    .log-info { color: #7dd3fc; }
+    .log-warn { color: #fbbf24; }
+    #console {
+      flex: 1;
+      min-height: 0;
+      padding: 4px;
+    }
+    button {
+      padding: 6px 16px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      margin: 4px;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .controls { padding: 8px 20px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CheerpX Proof of Concept</h1>
+  </header>
+  <div class="controls">
+    <button id="btn-boot" onclick="runBoot()">1. Boot CheerpX</button>
+    <button id="btn-concurrent" onclick="runConcurrentTest()" disabled>2. Test concurrent cx.run()</button>
+    <button id="btn-readblob" onclick="runReadBlobTest()" disabled>3. Test readFileAsBlob()</button>
+    <button id="btn-terminal" onclick="runTerminalTest()" disabled>4. Connect xterm.js</button>
+    <button id="btn-all" onclick="runAllTests()" disabled>Run all tests</button>
+  </div>
+  <div id="log"></div>
+  <div id="console"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script type="module">
+    // CheerpX is loaded as an ES module via the npm package approach
+    // For the PoC we load from CDN
+    import * as CheerpX from 'https://cxrtnc.leaningtech.com/1.0.8/cx.esm.js';
+
+    const logEl = document.getElementById('log');
+    let cx = null;
+    let blockCache = null;
+
+    function log(msg, cls = '') {
+      const div = document.createElement('div');
+      div.className = cls;
+      div.textContent = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
+    }
+
+    /* ── Test 1: Boot CheerpX ── */
+    window.runBoot = async function() {
+      document.getElementById('btn-boot').disabled = true;
+      log('Booting CheerpX...', 'log-info');
+      const t0 = performance.now();
+
+      try {
+        // Use a stock Debian image from WebVM
+        const blockDevice = await CheerpX.HttpBytesDevice.create(
+          'https://disks.webvm.io/debian_large_20230522_5044875331.ext2'
+        );
+        blockCache = await CheerpX.IDBDevice.create('clawzien-poc-v1');
+        const overlayDevice = await CheerpX.OverlayDevice.create(blockDevice, blockCache);
+        const dataDevice = await CheerpX.DataDevice.create();
+
+        cx = await CheerpX.Linux.create({
+          mounts: [
+            { type: 'ext2', dev: overlayDevice, path: '/' },
+            { type: 'dir', dev: dataDevice, path: '/data' },
+            { type: 'devs', path: '/dev' },
+            { type: 'devpts', path: '/dev/pts' },
+            { type: 'proc', path: '/proc' },
+          ],
+        });
+
+        const bootTime = ((performance.now() - t0) / 1000).toFixed(1);
+        log(`Boot completed in ${bootTime}s`, 'log-ok');
+
+        // Quick sanity check: run a simple command
+        log('Running sanity check: echo "hello from CheerpX"...', 'log-info');
+        const exitCode = await cx.run('/bin/bash', ['-c', 'echo "CheerpX is alive" > /tmp/sanity.txt'], {
+          env: ['HOME=/root', 'TERM=xterm', 'PATH=/usr/local/bin:/usr/bin:/bin'],
+          cwd: '/',
+          uid: 0,
+          gid: 0,
+        });
+        log(`Sanity check exit code: ${exitCode}`, exitCode === 0 ? 'log-ok' : 'log-err');
+
+        // Enable other test buttons
+        document.getElementById('btn-concurrent').disabled = false;
+        document.getElementById('btn-readblob').disabled = false;
+        document.getElementById('btn-terminal').disabled = false;
+        document.getElementById('btn-all').disabled = false;
+      } catch (e) {
+        log(`Boot FAILED: ${e.message || e}`, 'log-err');
+        console.error(e);
+        document.getElementById('btn-boot').disabled = false;
+      }
+    };
+
+    /* ── Test 2: Concurrent cx.run() ── */
+    /* This is the critical test: can we call cx.run() to write a file
+       while another cx.run() (long-running process) is still running?
+       If yes, the file-based bridge design works. */
+    window.runConcurrentTest = async function() {
+      if (!cx) { log('Boot first!', 'log-err'); return; }
+      document.getElementById('btn-concurrent').disabled = true;
+      log('Testing concurrent cx.run()...', 'log-info');
+
+      try {
+        // Start a long-running process (sleep 10)
+        log('  Starting long-running process: sleep 5...', 'log-info');
+        const longRunPromise = cx.run('/bin/bash', ['-c', 'sleep 5 && echo "long done" > /tmp/long_done.txt'], {
+          env: ['HOME=/root', 'TERM=xterm', 'PATH=/usr/local/bin:/usr/bin:/bin'],
+          cwd: '/',
+          uid: 0,
+          gid: 0,
+        });
+
+        // Wait a moment, then try to run another command concurrently
+        await new Promise(r => setTimeout(r, 500));
+        log('  Attempting concurrent cx.run() (write file)...', 'log-info');
+
+        try {
+          const t0 = performance.now();
+          const exitCode2 = await cx.run('/bin/bash', ['-c', 'echo "concurrent write" > /tmp/concurrent.txt'], {
+            env: ['HOME=/root', 'TERM=xterm', 'PATH=/usr/local/bin:/usr/bin:/bin'],
+            cwd: '/',
+            uid: 0,
+            gid: 0,
+          });
+          const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+          log(`  Concurrent cx.run() completed in ${elapsed}s, exit code: ${exitCode2}`, 'log-ok');
+          log('  RESULT: Concurrent cx.run() WORKS! Bridge design is valid.', 'log-ok');
+        } catch (e) {
+          log(`  Concurrent cx.run() FAILED: ${e.message}`, 'log-err');
+          log('  RESULT: Concurrent cx.run() does NOT work. Need fallback approach.', 'log-warn');
+        }
+
+        // Wait for the long-running process to finish
+        log('  Waiting for long-running process to complete...', 'log-info');
+        const exitCode1 = await longRunPromise;
+        log(`  Long-running process completed, exit code: ${exitCode1}`, exitCode1 === 0 ? 'log-ok' : 'log-err');
+      } catch (e) {
+        log(`Concurrent test error: ${e.message}`, 'log-err');
+      }
+      document.getElementById('btn-concurrent').disabled = false;
+    };
+
+    /* ── Test 3: readFileAsBlob while process is running ── */
+    window.runReadBlobTest = async function() {
+      if (!cx) { log('Boot first!', 'log-err'); return; }
+      document.getElementById('btn-readblob').disabled = true;
+      log('Testing readFileAsBlob during execution...', 'log-info');
+
+      try {
+        // First, write a known file
+        await cx.run('/bin/bash', ['-c', 'echo "test content for blob read" > /tmp/blob_test.txt'], {
+          env: ['HOME=/root', 'TERM=xterm', 'PATH=/usr/local/bin:/usr/bin:/bin'],
+          cwd: '/',
+          uid: 0,
+          gid: 0,
+        });
+        log('  Wrote test file /tmp/blob_test.txt', 'log-info');
+
+        // Start a long-running process
+        const longRunPromise = cx.run('/bin/bash', ['-c', 'for i in $(seq 1 5); do echo "$i" >> /tmp/counter.txt; sleep 1; done'], {
+          env: ['HOME=/root', 'TERM=xterm', 'PATH=/usr/local/bin:/usr/bin:/bin'],
+          cwd: '/',
+          uid: 0,
+          gid: 0,
+        });
+
+        // Try to read a file while the process is running
+        await new Promise(r => setTimeout(r, 500));
+        log('  Attempting readFileAsBlob while process runs...', 'log-info');
+
+        try {
+          const blob = await cx.readFileAsBlob('/tmp/blob_test.txt');
+          const text = await blob.text();
+          log(`  readFileAsBlob result: "${text.trim()}"`, 'log-ok');
+          log('  RESULT: readFileAsBlob WORKS during execution!', 'log-ok');
+        } catch (e) {
+          log(`  readFileAsBlob FAILED: ${e.message}`, 'log-err');
+          log('  RESULT: readFileAsBlob is BLOCKED during execution. Need alternative.', 'log-warn');
+        }
+
+        await longRunPromise;
+        log('  Background process completed.', 'log-info');
+      } catch (e) {
+        log(`readFileAsBlob test error: ${e.message}`, 'log-err');
+      }
+      document.getElementById('btn-readblob').disabled = false;
+    };
+
+    /* ── Test 4: xterm.js ↔ CheerpX console ── */
+    window.runTerminalTest = async function() {
+      if (!cx) { log('Boot first!', 'log-err'); return; }
+      document.getElementById('btn-terminal').disabled = true;
+      log('Connecting xterm.js to CheerpX console...', 'log-info');
+
+      try {
+        const consoleDiv = document.getElementById('console');
+        const term = new Terminal({
+          cursorBlink: true,
+          convertEol: true,
+          fontFamily: "'SF Mono', Menlo, Consolas, monospace",
+          fontSize: 14,
+          theme: {
+            background: '#0a0a14',
+            foreground: '#c8c8d4',
+            cursor: '#c8c8d4',
+          },
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(consoleDiv);
+        fitAddon.fit();
+        window.addEventListener('resize', () => fitAddon.fit());
+
+        // Connect CheerpX console to xterm.js
+        const cxReadFunc = cx.setCustomConsole(
+          (buf, vt) => {
+            // Only show VT 1 (main console)
+            if (vt !== 1) return;
+            term.write(new Uint8Array(buf));
+          },
+          term.cols,
+          term.rows,
+        );
+
+        // Forward terminal input to CheerpX
+        term.onData((str) => {
+          if (!cxReadFunc) return;
+          for (let i = 0; i < str.length; i++) {
+            cxReadFunc(str.charCodeAt(i));
+          }
+        });
+
+        log('xterm.js connected! You have a real bash shell below.', 'log-ok');
+        log('Type commands in the terminal. Try: ls /, uname -a, echo hello', 'log-info');
+
+        // Run bash in the terminal (this will block until bash exits)
+        cx.run('/bin/bash', ['--login'], {
+          env: ['HOME=/root', 'TERM=xterm', 'USER=root', 'SHELL=/bin/bash', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'],
+          cwd: '/root',
+          uid: 0,
+          gid: 0,
+        });
+      } catch (e) {
+        log(`Terminal test error: ${e.message}`, 'log-err');
+      }
+    };
+
+    /* ── Run all tests ── */
+    window.runAllTests = async function() {
+      document.getElementById('btn-all').disabled = true;
+      await window.runConcurrentTest();
+      await window.runReadBlobTest();
+      await window.runTerminalTest();
+    };
+  </script>
+</body>
+</html>

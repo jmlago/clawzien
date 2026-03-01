@@ -1,13 +1,24 @@
+import { resolve } from 'path';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  server: {
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
+  build: {
+    target: 'esnext',
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        app: resolve(__dirname, 'app/index.html'),
+      },
     },
   },
   optimizeDeps: {
-    exclude: ['@webcontainer/api'],
+    esbuildOptions: { target: 'esnext' },
+  },
+  server: {
+    headers: {
+      // Required by CheerpX (SharedArrayBuffer)
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
   },
 });
