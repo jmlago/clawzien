@@ -4,13 +4,11 @@
 # Parses the curl flags that subzeroclaw produces:
 #   curl -s -m 120 -K '/tmp/.szc_hdr_XXX' -H 'Content-Type: application/json' -d @'/tmp/.szc_body_XXX' 'https://...'
 #
-# Serializes the request to /tmp/bridge/requests/<id>.json,
-# touches .ready, and polls for /tmp/bridge/responses/<id>.json.ready
+# IPC protocol:
+#   Requests  → /ipc/req_ID.json  (VM writes, JS reads via ipcDevice)
+#   Responses → /data/resp_ID.json (JS writes via dataDevice, VM reads)
 
-BRIDGE_DIR="/tmp/bridge"
-REQUESTS_DIR="$BRIDGE_DIR/requests"
-RESPONSES_DIR="$BRIDGE_DIR/responses"
-STOP_FILE="$BRIDGE_DIR/stop"
+STOP_FILE="/tmp/bridge/stop"
 
 # Check stop flag
 if [ -f "$STOP_FILE" ]; then
@@ -54,15 +52,18 @@ while [ $# -gt 0 ]; do
       # Header file (subzeroclaw format: -H "Authorization: Bearer ...")
       HDRFILE="$2"
       if [ -f "$HDRFILE" ]; then
-        while IFS= read -r line; do
-          # Extract -H "Key: Value" patterns
-          if [[ "$line" =~ -H\ \"([^\"]+)\" ]]; then
-            HDR="${BASH_REMATCH[1]}"
-            KEY="${HDR%%:*}"
-            VAL="${HDR#*: }"
-            HEADERS_KEYS+=("$KEY")
-            HEADERS_VALS+=("$VAL")
-          fi
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in
+            -H\ *)
+              HDR="${line#-H }"
+              HDR="${HDR#\"}"
+              HDR="${HDR%\"}"
+              KEY="${HDR%%:*}"
+              VAL="${HDR#*: }"
+              HEADERS_KEYS+=("$KEY")
+              HEADERS_VALS+=("$VAL")
+              ;;
+          esac
         done < "$HDRFILE"
       fi
       shift 2
@@ -128,51 +129,43 @@ for i in "${!HEADERS_KEYS[@]}"; do
 done
 HEADERS_JSON+="}"
 
-# Write body to a temp file to avoid JSON escaping issues in shell
-BODY_FILE="$REQUESTS_DIR/${REQ_ID}.body"
+# Write body to /ipc for JS to read
+BODY_FILE="/ipc/${REQ_ID}.body"
 printf '%s' "$BODY" > "$BODY_FILE"
 
-# Write request JSON
-cat > "$REQUESTS_DIR/${REQ_ID}.json" << REQEOF
-{"id":"$REQ_ID","type":"http","method":"$METHOD","url":"$URL","headers":$HEADERS_JSON,"bodyFile":"$BODY_FILE","timeout":$TIMEOUT}
+# Write request JSON to /ipc
+cat > "/ipc/${REQ_ID}.json" << REQEOF
+{"id":"$REQ_ID","type":"http","method":"$METHOD","url":"$URL","headers":$HEADERS_JSON,"bodyFile":"/ipc/${REQ_ID}.body","timeout":$TIMEOUT}
 REQEOF
 
 # Signal request is ready
-touch "$REQUESTS_DIR/${REQ_ID}.ready"
+touch "/ipc/${REQ_ID}.ready"
 
-# Poll for response (timeout after TIMEOUT seconds)
+# Poll for response from /data (timeout after TIMEOUT seconds)
 ELAPSED=0
-while [ $ELAPSED -lt "$TIMEOUT" ]; do
+while [ $ELAPSED -lt $((TIMEOUT * 10)) ]; do
   if [ -f "$STOP_FILE" ]; then
     echo '{"error":{"message":"agent stopped"}}' >&2
-    rm -f "$REQUESTS_DIR/${REQ_ID}.json" "$REQUESTS_DIR/${REQ_ID}.ready" "$BODY_FILE" 2>/dev/null
+    rm -f "/ipc/${REQ_ID}.json" "/ipc/${REQ_ID}.ready" "$BODY_FILE" 2>/dev/null
     exit 1
   fi
 
-  if [ -f "$RESPONSES_DIR/${REQ_ID}.ready" ]; then
+  if [ -f "/data/resp_${REQ_ID}.ready" ]; then
     # Read and output response body
-    if [ -f "$RESPONSES_DIR/${REQ_ID}.json" ]; then
-      cat "$RESPONSES_DIR/${REQ_ID}.json"
+    if [ -f "/data/resp_${REQ_ID}.json" ]; then
+      cat "/data/resp_${REQ_ID}.json"
     fi
-    # Cleanup
-    rm -f "$RESPONSES_DIR/${REQ_ID}.json" "$RESPONSES_DIR/${REQ_ID}.ready" \
-          "$REQUESTS_DIR/${REQ_ID}.json" "$REQUESTS_DIR/${REQ_ID}.ready" \
-          "$BODY_FILE" 2>/dev/null
+    # Cleanup both /ipc and /data
+    rm -f "/ipc/${REQ_ID}.json" "/ipc/${REQ_ID}.ready" "$BODY_FILE" \
+          "/data/resp_${REQ_ID}.json" "/data/resp_${REQ_ID}.ready" 2>/dev/null
     exit 0
   fi
 
   sleep 0.1
   ELAPSED=$((ELAPSED + 1))
-  # Each iteration is ~0.1s, so multiply check by 10
-  if [ $((ELAPSED % 10)) -eq 0 ]; then
-    SECS=$((ELAPSED / 10))
-    if [ $SECS -ge "$TIMEOUT" ]; then
-      break
-    fi
-  fi
 done
 
 # Timeout
 echo '{"error":{"message":"curl-bridge: request timed out"}}' >&2
-rm -f "$REQUESTS_DIR/${REQ_ID}.json" "$REQUESTS_DIR/${REQ_ID}.ready" "$BODY_FILE" 2>/dev/null
+rm -f "/ipc/${REQ_ID}.json" "/ipc/${REQ_ID}.ready" "$BODY_FILE" 2>/dev/null
 exit 28

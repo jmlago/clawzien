@@ -118,7 +118,7 @@ export function restoreConfig(): void {
   };
 
   /* Merge: localStorage overrides .env defaults, but only for non-empty values */
-  let merged = { ...ENV_DEFAULTS, skill: '' };
+  let merged = { ...ENV_DEFAULTS, skill: 'argue/reviewer' };
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) {
     try {
@@ -135,10 +135,8 @@ export function restoreConfig(): void {
   set('privkey', merged.privkey);
   set('moltbook-key', merged.moltbookKey);
   if (merged.skill) {
-    requestAnimationFrame(() => {
-      const sel = document.getElementById('skill') as HTMLSelectElement;
-      if (sel) sel.value = merged.skill;
-    });
+    const sel = document.getElementById('skill') as HTMLSelectElement;
+    if (sel) sel.value = merged.skill;
   }
 }
 

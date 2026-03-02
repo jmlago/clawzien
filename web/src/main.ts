@@ -7,6 +7,8 @@ import { createEditor, type Editor } from './editor';
 import { privateKeyToAccount } from 'viem/accounts';
 import * as privy from './privy';
 import { generateWallet, getWallet } from './wallet';
+import * as chat from './chat';
+import { buildConfiguratorSkill } from './chat-configurator-skill';
 
 /* ── Skills tab DOM refs ───────────────────────────────── */
 
@@ -22,6 +24,13 @@ const btnRun = document.getElementById('btn-run') as HTMLButtonElement;
 const btnStop = document.getElementById('btn-stop') as HTMLButtonElement;
 
 let isRunning = false;
+
+/* ── Chat DOM refs ───────────────────────────────────────── */
+
+const chatMessages = document.getElementById('chat-messages')!;
+const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
+const chatSendBtn = document.getElementById('chat-send-btn') as HTMLButtonElement;
+let chatStarted = false;
 
 /* ── Token/cost tracking ───────────────────────────────── */
 
@@ -153,17 +162,21 @@ function resolveSessionEnv(
 
 /* ── Output polling ────────────────────────────────────── */
 
-const OUTPUT_LOG = '/tmp/agent_output.log';
+const OUTPUT_LOG = '/tmp/agent_output.log';    // VM path on ext2 (agent writes here)
 let outputPollTimer: ReturnType<typeof setInterval> | null = null;
 let lastOutputOffset = 0;
 
+let outputPolling = false;
+
 function startOutputPolling() {
   lastOutputOffset = 0;
+  outputPolling = false;
   outputPollTimer = setInterval(async () => {
+    if (outputPolling) return; // skip if previous poll still running
+    outputPolling = true;
     try {
-      const cxInstance = vm.getInstance();
-      const blob = await cxInstance.readFileAsBlob(OUTPUT_LOG);
-      const text = await blob.text();
+      // Read from ext2 via exec (creates short-lived file on /ipc that flushes properly)
+      const text = await vm.exec(`cat ${OUTPUT_LOG} 2>/dev/null`);
       if (text.length > lastOutputOffset) {
         const newContent = text.slice(lastOutputOffset);
         lastOutputOffset = text.length;
@@ -182,8 +195,10 @@ function startOutputPolling() {
       }
     } catch {
       // File may not exist yet or read may fail during heavy VM load
+    } finally {
+      outputPolling = false;
     }
-  }, 200);
+  }, 2000); // 2s interval to reduce VM pressure
 }
 
 function stopOutputPolling() {
@@ -250,12 +265,13 @@ async function run() {
       await vm.writeFile('/tmp/session_env.sh', sessionEnv.join('\n'));
     }
 
-    /* Build molly config prefix for skills that use molly-cli */
+    /* Build molly config prefix only for molly skills (require molly-cli in the VM) */
+    const isMollySkill = cfg.skill.startsWith('molly/');
     const mollyFactory = skillContent.match(/factoryAddress\s+(0x[0-9a-fA-F]{40})/)?.[1];
     const mollyIdentity = skillContent.match(/identityAddress\s+(0x[0-9a-fA-F]{40})/)?.[1];
     const mollyNetwork = skillContent.match(/network\s+(https?:\/\/\S+)/)?.[1];
     let mollyPrefix = '';
-    if (mollyFactory || mollyIdentity || cfg.privkey) {
+    if (isMollySkill && (mollyFactory || mollyIdentity || cfg.privkey)) {
       const cmds: string[] = [];
       if (mollyFactory) cmds.push(`molly config set factoryAddress ${mollyFactory} > /dev/null 2>&1`);
       if (mollyIdentity) cmds.push(`molly config set identityAddress ${mollyIdentity} > /dev/null 2>&1`);
@@ -272,22 +288,22 @@ async function run() {
     resetRunCost();
     startTimer();
 
-    /* Clear any previous stop flag and output log */
-    await bridge.clearStop();
-    await vm.writeFile(OUTPUT_LOG, '');
-
     /* Start the bridge (polls for HTTP/cast requests from curl-bridge.sh) */
     bridge.start(vm.getInstance(), {
       onUsage: addUsage,
       onRetry: (msg) => writeln(msg),
     });
 
+    /* Clear any previous stop flag and output log (must be after bridge.start which sets cx) */
+    await bridge.clearStop();
+    await vm.writeFile(OUTPUT_LOG, '');
+
     /* Start polling agent output */
     startOutputPolling();
 
     /* Build the full command to run in the VM */
     const envSetup = sessionEnv.length > 0
-      ? `source /tmp/session_env.sh && `
+      ? `source /tmp/session_env.sh`
       : '';
 
     const shellCmd = [
@@ -296,26 +312,29 @@ async function run() {
       `export SUBZEROCLAW_MODEL="${cfg.model}"`,
       `export SUBZEROCLAW_ENDPOINT="${cfg.endpoint}"`,
       mollyPrefix ? `(${mollyPrefix} true)` : '',
-      `subzeroclaw '${cfg.prompt.replace(/'/g, "'\\''")}'`,
+      `stdbuf -oL subzeroclaw '${cfg.prompt.replace(/'/g, "'\\''")}'`,
     ].filter(Boolean).join(' && ');
 
-    /* Run subzeroclaw in the VM, redirecting output to the log file */
-    const exitCode = await vm.run('/bin/bash', ['-c', `${shellCmd} > ${OUTPUT_LOG} 2>&1`], sessionEnv);
+    /* Run subzeroclaw in the VM, redirecting output to the log file.
+       Session env vars are sourced from /tmp/session_env.sh inside the shell command,
+       NOT passed as CheerpX env entries (CheerpX expects KEY=VALUE, not shell export statements). */
+    const exitCode = await vm.run('/bin/bash', ['-c', `${shellCmd} > ${OUTPUT_LOG} 2>&1`]);
 
     // Final output poll to catch any remaining content
     await new Promise(r => setTimeout(r, 300));
     stopOutputPolling();
-    // One last read
+    // One last read via exec (ext2 file, not IPC)
     try {
-      const blob = await vm.getInstance().readFileAsBlob(OUTPUT_LOG);
-      const text = await blob.text();
+      const text = await vm.exec(`cat ${OUTPUT_LOG} 2>/dev/null`);
       if (text.length > lastOutputOffset) {
         const remaining = text.slice(lastOutputOffset);
         for (const line of remaining.split('\n')) {
           if (line) writeln(line);
         }
       }
-    } catch { /* ignore */ }
+    } catch (readErr) {
+      console.warn('[output] final read failed:', readErr);
+    }
 
     if (exitCode === 0) {
       writeln('\r\n--- Done ---');
@@ -542,6 +561,71 @@ document.getElementById('btn-copy-term')!.addEventListener('click', () => {
       btn.classList.remove('copied');
     }, 1500);
   });
+});
+
+/* ── Chat helpers ──────────────────────────────────────── */
+
+function appendChatMessage(role: 'user' | 'assistant' | 'system', text: string) {
+  const bubble = document.createElement('div');
+  bubble.className = `chat-bubble ${role}`;
+  bubble.textContent = text;
+  chatMessages.appendChild(bubble);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function ensureChatStarted() {
+  if (chatStarted) return;
+  chatStarted = true;
+
+  const cfg = readConfig();
+  const envContext = envEditor?.getValue() || BROWSER_ENV_CONTEXT;
+
+  const configuratorSkill = buildConfiguratorSkill(
+    cfg.skill,
+    cfg.prompt,
+    cfg.model,
+    envContext,
+  );
+
+  chat.startChat(
+    configuratorSkill,
+    cfg.apiKey,
+    cfg.model,
+    cfg.endpoint,
+    envContext,
+    { onMessage: appendChatMessage },
+  );
+}
+
+function sendChatMessage() {
+  const text = chatInput.value.trim();
+  if (!text || !chat.isChatRunning() || chat.isChatBusy()) return;
+  appendChatMessage('user', text);
+  chatInput.value = '';
+  chatInput.style.height = 'auto';
+  chat.sendMessage(text);
+}
+
+/* Chat input: Enter to send, Shift+Enter for newline */
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
+
+/* Auto-resize textarea */
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+});
+
+/* Send button click */
+chatSendBtn.addEventListener('click', sendChatMessage);
+
+/* Chat tab click — lazy init */
+document.querySelector('[data-view="chat"]')!.addEventListener('click', () => {
+  ensureChatStarted();
 });
 
 /* ── Start ──────────────────────────────────────────────── */

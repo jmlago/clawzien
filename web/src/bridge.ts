@@ -2,21 +2,19 @@
  * bridge.ts — Browser-side bridge that polls the CheerpX VM for HTTP/cast
  * requests and dispatches them via browser fetch() or cast-browser.ts.
  *
- * Protocol:
- *   VM writes:  /tmp/bridge/requests/<id>.json  + touches <id>.ready
- *   Bridge reads request, dispatches, writes response to:
- *               /tmp/bridge/responses/<id>.json  + touches <id>.ready
+ * IPC protocol (using separate devices):
+ *   VM writes requests to /ipc/  (dir-mounted IDBDevice — JS reads via ipcDevice.readFileAsBlob)
+ *   JS writes responses to /data/ (DataDevice — VM reads as normal files)
  *
- * Request types:
- *   { type: "http", method, url, headers, bodyFile?, body?, timeout }
- *   { type: "cast", args: string[] }
- *
- * Response (written as raw text — the body of the HTTP response or cast output):
- *   For HTTP: the raw response body text
- *   For cast: the cast output text
+ * Request flow:
+ *   VM curl-bridge.sh → /ipc/req_ID.json + /ipc/req_ID.ready
+ *   JS reads via readBlob("/req_ID.json"), dispatches fetch/cast
+ *   JS writes response via writeToData("/resp_req_ID.json") + writeToData("/resp_req_ID.ready")
+ *   VM polls /data/resp_req_ID.ready, reads /data/resp_req_ID.json
  */
 
 import { executeCast } from './cast-browser';
+import { readBlob, writeToData } from './cheerpx';
 
 export interface BridgeCallbacks {
   /** Called when an OpenRouter response contains usage data */
@@ -26,13 +24,10 @@ export interface BridgeCallbacks {
 }
 
 interface CheerpXInstance {
-  run(cmd: string, args: string[], opts?: Record<string, unknown>): Promise<number>;
-  readFileAsBlob(path: string): Promise<Blob>;
+  run(cmd: string, args: string[], opts?: Record<string, unknown>): Promise<{ status: number }>;
 }
 
-const POLL_INTERVAL = 100; // ms
-const REQUESTS_DIR = '/tmp/bridge/requests';
-const RESPONSES_DIR = '/tmp/bridge/responses';
+const POLL_INTERVAL = 500; // ms — keep low pressure on CheerpX WASM VM
 const STOP_FILE = '/tmp/bridge/stop';
 
 const RUN_OPTS = {
@@ -46,6 +41,7 @@ let cx: CheerpXInstance | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let callbacks: BridgeCallbacks = {};
 let processing = new Set<string>();
+let polling = false;
 
 /** Start the bridge polling loop */
 export function start(cxInstance: CheerpXInstance, cbs: BridgeCallbacks = {}): void {
@@ -80,24 +76,21 @@ export async function clearStop(): Promise<void> {
 /** Ensure bridge directories exist */
 export async function ensureDirs(): Promise<void> {
   if (!cx) return;
-  await cx.run('/bin/bash', ['-c', `mkdir -p ${REQUESTS_DIR} ${RESPONSES_DIR}`], RUN_OPTS);
+  await cx.run('/bin/bash', ['-c', 'mkdir -p /tmp/bridge'], RUN_OPTS);
 }
 
-/** Poll for .ready files in the requests directory */
+/** Poll for .ready files in /ipc — write listing to /ipc/_pending.txt, then read via ipcDevice */
 async function pollForRequests(): Promise<void> {
-  if (!cx) return;
+  if (!cx || polling) return;
+  polling = true;
 
   try {
-    // List .ready files in the requests dir
-    const blob = await cx.readFileAsBlob(`${REQUESTS_DIR}/.poll`).catch(() => null);
-    // readFileAsBlob on a specific file won't list directories.
-    // Instead, run a quick ls to find .ready files
-    // We use a lightweight approach: run ls and capture output via a temp file
+    // List .ready files in /ipc, extract request IDs
     await cx.run('/bin/bash', ['-c',
-      `ls ${REQUESTS_DIR}/*.ready 2>/dev/null | sed 's/.*\\///' | sed 's/\\.ready$//' > /tmp/bridge/_pending.txt 2>/dev/null || true`,
+      `ls /ipc/*.ready 2>/dev/null | sed 's|.*/||' | sed 's/\\.ready$//' > /ipc/_pending.txt 2>/dev/null || true`,
     ], RUN_OPTS);
 
-    const pendingBlob = await cx.readFileAsBlob('/tmp/bridge/_pending.txt').catch(() => null);
+    const pendingBlob = await readBlob('/_pending.txt').catch(() => null);
     if (!pendingBlob) return;
 
     const pendingText = await pendingBlob.text();
@@ -110,6 +103,8 @@ async function pollForRequests(): Promise<void> {
     }
   } catch {
     // Polling errors are expected during boot / heavy load — just retry next tick
+  } finally {
+    polling = false;
   }
 }
 
@@ -118,8 +113,12 @@ async function handleRequest(id: string): Promise<void> {
   if (!cx) return;
 
   try {
-    // Read the request JSON
-    const reqBlob = await cx.readFileAsBlob(`${REQUESTS_DIR}/${id}.json`);
+    // Read the request JSON from /ipc via ipcDevice
+    const reqBlob = await readBlob(`/${id}.json`);
+    if (!reqBlob) {
+      console.warn(`[bridge] request ${id}: blob is null (race condition), skipping`);
+      return;
+    }
     const reqText = await reqBlob.text();
     const req = JSON.parse(reqText);
 
@@ -133,37 +132,16 @@ async function handleRequest(id: string): Promise<void> {
       responseText = JSON.stringify({ error: { message: `unknown request type: ${req.type}` } });
     }
 
-    // Write response back to VM
-    // Use base64 encoding to avoid shell escaping issues
-    // Split into chunks to avoid shell argument length limits
-    const responseB64 = btoa(unescape(encodeURIComponent(responseText)));
-    const CHUNK_SIZE = 65536;
-    if (responseB64.length <= CHUNK_SIZE) {
-      await cx.run('/bin/bash', ['-c',
-        `printf '%s' '${responseB64}' | base64 -d > ${RESPONSES_DIR}/${id}.json && touch ${RESPONSES_DIR}/${id}.ready`,
-      ], RUN_OPTS);
-    } else {
-      // Write base64 data in chunks, then decode
-      const tmpB64 = `/tmp/bridge/_resp_${id}.b64`;
-      await cx.run('/bin/bash', ['-c', `> ${tmpB64}`], RUN_OPTS);
-      for (let i = 0; i < responseB64.length; i += CHUNK_SIZE) {
-        const chunk = responseB64.slice(i, i + CHUNK_SIZE);
-        await cx.run('/bin/bash', ['-c',
-          `printf '%s' '${chunk}' >> ${tmpB64}`,
-        ], RUN_OPTS);
-      }
-      await cx.run('/bin/bash', ['-c',
-        `base64 -d ${tmpB64} > ${RESPONSES_DIR}/${id}.json && rm -f ${tmpB64} && touch ${RESPONSES_DIR}/${id}.ready`,
-      ], RUN_OPTS);
-    }
+    // Write response to /data via dataDevice (VM reads from /data/resp_ID.json)
+    await writeToData(`/resp_${id}.json`, responseText);
+    await writeToData(`/resp_${id}.ready`, '');
   } catch (e: any) {
     console.error(`[bridge] error handling request ${id}:`, e);
-    // Try to write an error response
+    // Try to write an error response via dataDevice
     try {
-      const errMsg = (e.message || 'bridge error').replace(/'/g, "'\\''");
-      await cx!.run('/bin/bash', ['-c',
-        `echo '{"error":{"message":"${errMsg}"}}' > ${RESPONSES_DIR}/${id}.json && touch ${RESPONSES_DIR}/${id}.ready`,
-      ], RUN_OPTS);
+      const errMsg = JSON.stringify({ error: { message: e.message || 'bridge error' } });
+      await writeToData(`/resp_${id}.json`, errMsg);
+      await writeToData(`/resp_${id}.ready`, '');
     } catch { /* give up */ }
   }
 }
@@ -180,10 +158,13 @@ async function handleHttpRequest(req: {
 }): Promise<string> {
   let body = req.body;
 
-  // If bodyFile is specified, read it from the VM
+  // If bodyFile is specified, read it from /ipc via ipcDevice
   if (req.bodyFile && !body) {
     try {
-      const bodyBlob = await cx!.readFileAsBlob(req.bodyFile);
+      // bodyFile is an absolute VM path like "/ipc/req_123.body"
+      // readBlob expects path relative to /ipc, so strip the /ipc prefix
+      const ipcRelPath = req.bodyFile.replace(/^\/ipc/, '');
+      const bodyBlob = await readBlob(ipcRelPath);
       body = await bodyBlob.text();
     } catch (e: any) {
       console.error('[bridge] failed to read body file:', e.message);

@@ -3,11 +3,12 @@
 #
 # Pure-compute subcommands run the native cast binary directly (no network needed).
 # Network-dependent subcommands go through the browser bridge (same protocol as curl-bridge).
+#
+# IPC protocol:
+#   Requests  → /ipc/req_ID.json  (VM writes, JS reads via ipcDevice)
+#   Responses → /data/resp_ID.json (JS writes via dataDevice, VM reads)
 
-BRIDGE_DIR="/tmp/bridge"
-REQUESTS_DIR="$BRIDGE_DIR/requests"
-RESPONSES_DIR="$BRIDGE_DIR/responses"
-STOP_FILE="$BRIDGE_DIR/stop"
+STOP_FILE="/tmp/bridge/stop"
 CAST_NATIVE="/usr/local/bin/cast-native"
 
 # Check stop flag
@@ -41,31 +42,31 @@ for arg in "$@"; do
 done
 ARGS_JSON+="]"
 
-# Write request
-cat > "$REQUESTS_DIR/${REQ_ID}.json" << REQEOF
+# Write request to /ipc
+cat > "/ipc/${REQ_ID}.json" << REQEOF
 {"id":"$REQ_ID","type":"cast","args":$ARGS_JSON}
 REQEOF
 
 # Signal ready
-touch "$REQUESTS_DIR/${REQ_ID}.ready"
+touch "/ipc/${REQ_ID}.ready"
 
-# Poll for response (120s timeout)
+# Poll for response from /data (120s timeout)
 TIMEOUT=120
 ELAPSED=0
 while [ $ELAPSED -lt $((TIMEOUT * 10)) ]; do
   if [ -f "$STOP_FILE" ]; then
     echo "Error: agent stopped" >&2
-    rm -f "$REQUESTS_DIR/${REQ_ID}.json" "$REQUESTS_DIR/${REQ_ID}.ready" 2>/dev/null
+    rm -f "/ipc/${REQ_ID}.json" "/ipc/${REQ_ID}.ready" 2>/dev/null
     exit 1
   fi
 
-  if [ -f "$RESPONSES_DIR/${REQ_ID}.ready" ]; then
-    if [ -f "$RESPONSES_DIR/${REQ_ID}.json" ]; then
-      cat "$RESPONSES_DIR/${REQ_ID}.json"
+  if [ -f "/data/resp_${REQ_ID}.ready" ]; then
+    if [ -f "/data/resp_${REQ_ID}.json" ]; then
+      cat "/data/resp_${REQ_ID}.json"
     fi
     # Cleanup
-    rm -f "$RESPONSES_DIR/${REQ_ID}.json" "$RESPONSES_DIR/${REQ_ID}.ready" \
-          "$REQUESTS_DIR/${REQ_ID}.json" "$REQUESTS_DIR/${REQ_ID}.ready" 2>/dev/null
+    rm -f "/ipc/${REQ_ID}.json" "/ipc/${REQ_ID}.ready" \
+          "/data/resp_${REQ_ID}.json" "/data/resp_${REQ_ID}.ready" 2>/dev/null
     exit 0
   fi
 
@@ -74,5 +75,5 @@ while [ $ELAPSED -lt $((TIMEOUT * 10)) ]; do
 done
 
 echo "Error: cast bridge request timed out" >&2
-rm -f "$REQUESTS_DIR/${REQ_ID}.json" "$REQUESTS_DIR/${REQ_ID}.ready" 2>/dev/null
+rm -f "/ipc/${REQ_ID}.json" "/ipc/${REQ_ID}.ready" 2>/dev/null
 exit 1
