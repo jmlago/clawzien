@@ -13,8 +13,16 @@
 import * as vm from './cheerpx';
 import * as bridge from './bridge';
 
+export interface ActivityEntry {
+  role: 'TOOL' | 'RES' | 'ASST' | 'SYS' | 'COMPACT';
+  content: string;
+  timestamp: string;
+}
+
 export interface ChatCallbacks {
   onMessage: (role: 'user' | 'assistant' | 'system', text: string) => void;
+  onActivity?: (entries: ActivityEntry[]) => void;
+  onActivityDone?: () => void;
 }
 
 const CHAT_LOG = '/tmp/chat_output.log';
@@ -30,6 +38,8 @@ let chatEnvContext = '';
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let lastOffset = 0;
 let polling = false;
+let sessionId: string | null = null;
+let sessionLogOffset = 0;
 
 /**
  * Start the chat session.  Just stores config — no VM operations.
@@ -88,9 +98,11 @@ export async function sendMessage(text: string): Promise<void> {
     bridge.start(vm.getInstance(), {});
     await bridge.clearStop();
 
-    // Clear previous output log
+    // Clear previous output log and session state
     await vm.writeFile(CHAT_LOG, '');
     lastOffset = 0;
+    sessionId = null;
+    sessionLogOffset = 0;
 
     // Start polling the output log
     startOutputPolling();
@@ -106,9 +118,12 @@ export async function sendMessage(text: string): Promise<void> {
 
     await vm.run('/bin/bash', ['-c', `${shellCmd} > ${CHAT_LOG} 2>&1`]);
 
-    // Final poll to catch remaining output
+    // Final poll to catch remaining output and activity
     await new Promise(r => setTimeout(r, 500));
     await flushOutput();
+    await extractSessionId();
+    await pollSessionLog();
+    callbacks?.onActivityDone?.();
   } catch (e: any) {
     callbacks?.onMessage('system', `Error: ${e.message}`);
   } finally {
@@ -150,6 +165,8 @@ function startOutputPolling(): void {
     polling = true;
     try {
       await flushOutput();
+      await extractSessionId();
+      await pollSessionLog();
     } finally {
       polling = false;
     }
@@ -172,13 +189,99 @@ async function flushOutput(): Promise<void> {
     const newContent = text.slice(lastOffset);
     lastOffset = text.length;
 
-    const trimmed = newContent.trim();
+    // Filter stderr lines (session header, turn markers, compaction notices)
+    const lines = newContent.split('\n');
+    const filtered = lines.filter(l => !isStderrLine(l));
+    const trimmed = filtered.join('\n').trim();
+
     if (trimmed) {
       callbacks.onMessage('assistant', trimmed);
     }
   } catch {
     // File may not exist yet or VM busy
   }
+}
+
+/* ── Session log polling ──────────────────────────────── */
+
+/** Stderr lines from subzeroclaw (session header, turn markers, compaction) */
+function isStderrLine(line: string): boolean {
+  if (/^subzeroclaw\s+·/.test(line)) return true;
+  if (/^\[\d+\]\s/.test(line)) return true;
+  if (/^\[compact\]/.test(line)) return true;
+  return false;
+}
+
+/** Extract the 16-char hex session ID from the stderr header in CHAT_LOG */
+async function extractSessionId(): Promise<void> {
+  if (sessionId) return;
+  try {
+    const text = await vm.exec(`head -5 ${CHAT_LOG} 2>/dev/null`);
+    const m = text.match(/subzeroclaw\s+·\s+\S+\s+·\s+([0-9a-f]{16})/);
+    if (m) {
+      sessionId = m[1];
+      sessionLogOffset = 0;
+    }
+  } catch {
+    // File may not exist yet
+  }
+}
+
+/** Poll the session log file for new activity entries */
+async function pollSessionLog(): Promise<void> {
+  if (!sessionId || !callbacks) return;
+  try {
+    const logPath = `/root/.subzeroclaw/logs/${sessionId}.txt`;
+    const text = await vm.exec(`cat ${logPath} 2>/dev/null`);
+    if (text.length <= sessionLogOffset) return;
+
+    const delta = text.slice(sessionLogOffset);
+    sessionLogOffset = text.length;
+
+    const entries = parseLogEntries(delta);
+    if (entries.length > 0) {
+      callbacks.onActivity?.(entries);
+    }
+  } catch {
+    // Log file may not exist yet
+  }
+}
+
+/** Parse structured log entries from session log text */
+export function parseLogEntries(text: string): ActivityEntry[] {
+  const entries: ActivityEntry[] = [];
+  const pattern = /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (USER|TOOL|RES|ASST|SYS|COMPACT): /g;
+
+  type Match = { timestamp: string; role: string; contentStart: number; matchStart: number };
+  const matches: Match[] = [];
+  let m;
+  while ((m = pattern.exec(text)) !== null) {
+    matches.push({
+      timestamp: m[1],
+      role: m[2],
+      contentStart: m.index + m[0].length,
+      matchStart: m.index,
+    });
+  }
+
+  for (let i = 0; i < matches.length; i++) {
+    const { timestamp, role, contentStart } = matches[i];
+    if (role === 'USER') continue; // filter out user entries
+
+    const contentEnd = i + 1 < matches.length
+      ? matches[i + 1].matchStart
+      : text.length;
+
+    const content = text.slice(contentStart, contentEnd).trimEnd();
+
+    entries.push({
+      role: role as ActivityEntry['role'],
+      content,
+      timestamp,
+    });
+  }
+
+  return entries;
 }
 
 /* ── Helpers ──────────────────────────────────────────── */

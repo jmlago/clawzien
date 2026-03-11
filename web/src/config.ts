@@ -68,6 +68,9 @@ export interface AppConfig {
   privkey: string;
   moltbookKey: string;
   prompt: string;
+  runMode: 'once' | 'cron';
+  cronInterval: number;  // minutes between runs
+  cronTimeout: number;   // max minutes per run
 }
 
 /** Read config from DOM inputs */
@@ -81,6 +84,10 @@ export function readConfig(): AppConfig {
     if (w) privkey = w.privateKey;
   }
 
+  const runMode = document.getElementById('run-mode-cron')?.classList.contains('active')
+    ? 'cron' as const
+    : 'once' as const;
+
   return {
     apiKey: el('api-key'),
     model: el('model'),
@@ -89,6 +96,9 @@ export function readConfig(): AppConfig {
     privkey,
     moltbookKey: el('moltbook-key'),
     prompt: el('prompt'),
+    runMode,
+    cronInterval: parseInt((document.getElementById('cron-interval') as HTMLInputElement)?.value) || 30,
+    cronTimeout: parseInt((document.getElementById('cron-timeout') as HTMLInputElement)?.value) || 10,
   };
 }
 
@@ -103,6 +113,9 @@ export function saveConfig(cfg: AppConfig): void {
       skill: cfg.skill,
       privkey: cfg.privkey,
       moltbookKey: cfg.moltbookKey,
+      runMode: cfg.runMode,
+      cronInterval: cfg.cronInterval,
+      cronTimeout: cfg.cronTimeout,
     }),
   );
 }
@@ -124,7 +137,7 @@ export function restoreConfig(): void {
     try {
       const saved = JSON.parse(raw);
       for (const [k, v] of Object.entries(saved)) {
-        if (v && typeof v === 'string') (merged as any)[k] = v;
+        if (v && (typeof v === 'string' || typeof v === 'number')) (merged as any)[k] = v;
       }
     } catch { /* ignore corrupt data */ }
   }
@@ -138,6 +151,21 @@ export function restoreConfig(): void {
     const sel = document.getElementById('skill') as HTMLSelectElement;
     if (sel) sel.value = merged.skill;
   }
+
+  /* Restore run mode toggle and cron config */
+  const savedRunMode = (merged as any).runMode || 'once';
+  const onceBtn = document.getElementById('run-mode-once');
+  const cronBtn = document.getElementById('run-mode-cron');
+  const cronConfig = document.getElementById('cron-config');
+  if (onceBtn && cronBtn && cronConfig) {
+    onceBtn.classList.toggle('active', savedRunMode === 'once');
+    cronBtn.classList.toggle('active', savedRunMode === 'cron');
+    cronConfig.style.display = savedRunMode === 'cron' ? '' : 'none';
+  }
+  const cronIntervalEl = document.getElementById('cron-interval') as HTMLInputElement | null;
+  const cronTimeoutEl = document.getElementById('cron-timeout') as HTMLInputElement | null;
+  if (cronIntervalEl) cronIntervalEl.value = String((merged as any).cronInterval || 30);
+  if (cronTimeoutEl) cronTimeoutEl.value = String((merged as any).cronTimeout || 10);
 }
 
 /** Populate the skill dropdown */

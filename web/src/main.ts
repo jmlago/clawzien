@@ -8,6 +8,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import * as privy from './privy';
 import { generateWallet, getWallet } from './wallet';
 import * as chat from './chat';
+import { parseLogEntries, type ActivityEntry } from './chat';
 import { buildConfiguratorSkill } from './chat-configurator-skill';
 
 /* ── Skills tab DOM refs ───────────────────────────────── */
@@ -25,12 +26,87 @@ const btnStop = document.getElementById('btn-stop') as HTMLButtonElement;
 
 let isRunning = false;
 
+/* ── Cron mode state ─────────────────────────────────────── */
+
+let isCronMode = false;
+let cronAbort = false;
+let cronCountdownTimer: ReturnType<typeof setInterval> | null = null;
+
 /* ── Chat DOM refs ───────────────────────────────────────── */
 
 const chatMessages = document.getElementById('chat-messages')!;
 const chatInput = document.getElementById('chat-input') as HTMLTextAreaElement;
 const chatSendBtn = document.getElementById('chat-send-btn') as HTMLButtonElement;
 let chatStarted = false;
+
+/* ── Chat activity state ──────────────────────────────── */
+
+let currentActivityEl: HTMLDetailsElement | null = null;
+let currentActivityContent: HTMLDivElement | null = null;
+let currentActivitySummary: HTMLElement | null = null;
+let activityEntryCount = 0;
+let currentActivityWrapper: HTMLDivElement | null = null;
+
+/* ── Identicon / avatar state ─────────────────────────── */
+
+const CLAWZIEN_SEED = 0xC1A2;
+const IDENTICON_COLORS = ['#d4a843', '#5a8a5a', '#c45a5a', '#5a8a8a', '#8a5a8a', '#8a8a5a'];
+
+let flickeringAvatar: HTMLCanvasElement | null = null;
+let flickerTimer: ReturnType<typeof setInterval> | null = null;
+
+function seededRng(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) | 0;
+    return (s >>> 0) / 0x100000000;
+  };
+}
+
+function generateIdenticon(canvas: HTMLCanvasElement, seed?: number): void {
+  const ctx = canvas.getContext('2d')!;
+  const rng = seed != null ? seededRng(seed) : () => Math.random();
+
+  const fg = IDENTICON_COLORS[Math.floor(rng() * IDENTICON_COLORS.length)];
+  const bg = '#1a1a1a';
+  const cellW = canvas.width / 5;
+  const cellH = canvas.height / 5;
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Generate left half + center column (cols 0-2), mirror for cols 3-4
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
+      if (rng() > 0.5) {
+        ctx.fillStyle = fg;
+        ctx.fillRect(col * cellW, row * cellH, cellW, cellH);
+        // Mirror (col 0 → col 4, col 1 → col 3, col 2 is center)
+        if (col < 2) {
+          ctx.fillRect((4 - col) * cellW, row * cellH, cellW, cellH);
+        }
+      }
+    }
+  }
+}
+
+function startAvatarFlicker(): void {
+  if (!flickeringAvatar) return;
+  flickerTimer = setInterval(() => {
+    if (flickeringAvatar) generateIdenticon(flickeringAvatar);
+  }, 120);
+}
+
+function stopAvatarFlicker(): void {
+  if (flickerTimer) {
+    clearInterval(flickerTimer);
+    flickerTimer = null;
+  }
+  if (flickeringAvatar) {
+    generateIdenticon(flickeringAvatar, CLAWZIEN_SEED);
+    flickeringAvatar = null;
+  }
+}
 
 /* ── Token/cost tracking ───────────────────────────────── */
 
@@ -109,6 +185,84 @@ function setStatus(text: string, cls: string = '') {
   statusEl.className = cls;
 }
 
+/* ── Cron helpers ──────────────────────────────────────── */
+
+function updateRunButtonLabel(mode: 'once' | 'cron') {
+  btnRun.innerHTML = mode === 'cron'
+    ? '&infin; Cron <span class="btn-hint">Ctrl+Enter</span>'
+    : 'Run <span class="btn-hint">Ctrl+Enter</span>';
+}
+
+function clearCronCountdown() {
+  if (cronCountdownTimer) {
+    clearInterval(cronCountdownTimer);
+    cronCountdownTimer = null;
+  }
+}
+
+function cronWait(intervalMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((intervalMs - (Date.now() - start)) / 1000));
+      setStatus(`Cron: waiting (next in ${fmtTime(remaining)})`, 'cron-waiting');
+    };
+    update();
+    cronCountdownTimer = setInterval(() => {
+      if (cronAbort) {
+        clearCronCountdown();
+        resolve(false);
+        return;
+      }
+      const elapsed = Date.now() - start;
+      if (elapsed >= intervalMs) {
+        clearCronCountdown();
+        resolve(true);
+        return;
+      }
+      update();
+    }, 1000);
+  });
+}
+
+async function runCron() {
+  const cfg = readConfig();
+  const intervalMs = cfg.cronInterval * 60 * 1000;
+  const timeoutMs = cfg.cronTimeout * 60 * 1000;
+
+  isCronMode = true;
+  cronAbort = false;
+
+  try {
+    while (!cronAbort) {
+      setStatus('Cron: running', 'running');
+
+      // Per-run timeout: stop the bridge after Y minutes
+      const timeoutId = setTimeout(async () => {
+        writeln(`\r\nCron: timeout (${cfg.cronTimeout}m) — stopping run...`);
+        await bridge.stop();
+      }, timeoutMs);
+
+      await run();
+
+      clearTimeout(timeoutId);
+
+      if (cronAbort) break;
+
+      // Wait phase
+      const shouldContinue = await cronWait(intervalMs);
+      if (!shouldContinue) break;
+    }
+  } finally {
+    clearCronCountdown();
+    isCronMode = false;
+    cronAbort = false;
+    btnRun.disabled = false;
+    btnStop.style.display = 'none';
+    setStatus('Ready', 'ready');
+  }
+}
+
 /* ── Session Variables ──────────────────────────────────── */
 
 /**
@@ -167,10 +321,14 @@ let outputPollTimer: ReturnType<typeof setInterval> | null = null;
 let lastOutputOffset = 0;
 
 let outputPolling = false;
+let termSessionId: string | null = null;
+let termSessionLogOffset = 0;
 
 function startOutputPolling() {
   lastOutputOffset = 0;
   outputPolling = false;
+  termSessionId = null;
+  termSessionLogOffset = 0;
   outputPollTimer = setInterval(async () => {
     if (outputPolling) return; // skip if previous poll still running
     outputPolling = true;
@@ -181,18 +339,30 @@ function startOutputPolling() {
         const newContent = text.slice(lastOutputOffset);
         lastOutputOffset = text.length;
 
-        // Display new output lines
+        // Display new output lines, filtering stderr
         for (const line of newContent.split('\n')) {
           if (!line && lastOutputOffset === text.length) continue; // skip trailing empty
           // Reformat turn headers: [N] model... → ── Turn N ──
           const turnMatch = line.match(/^\[(\d+)\]\s/);
           if (turnMatch) {
             writeln(`\n── Turn ${turnMatch[1]} ──`);
+          } else if (/^subzeroclaw\s+·/.test(line)) {
+            // Extract session ID from header, don't display
+            const m = line.match(/·\s+([0-9a-f]{16})/);
+            if (m && !termSessionId) {
+              termSessionId = m[1];
+              termSessionLogOffset = 0;
+            }
+          } else if (/^\[compact\]/.test(line)) {
+            // Skip — will appear in activity
           } else {
             writeln(line);
           }
         }
       }
+
+      // Poll session log for activity
+      await pollTerminalSessionLog();
     } catch {
       // File may not exist yet or read may fail during heavy VM load
     } finally {
@@ -205,6 +375,53 @@ function stopOutputPolling() {
   if (outputPollTimer) {
     clearInterval(outputPollTimer);
     outputPollTimer = null;
+  }
+}
+
+async function pollTerminalSessionLog(): Promise<void> {
+  if (!termSessionId) return;
+  try {
+    const logPath = `/root/.subzeroclaw/logs/${termSessionId}.txt`;
+    const text = await vm.exec(`cat ${logPath} 2>/dev/null`);
+    if (text.length <= termSessionLogOffset) return;
+
+    const delta = text.slice(termSessionLogOffset);
+    termSessionLogOffset = text.length;
+
+    const entries = parseLogEntries(delta);
+    for (const entry of entries) {
+      writeTerminalActivity(entry);
+    }
+  } catch {
+    // Log file may not exist yet
+  }
+}
+
+function writeTerminalActivity(entry: ActivityEntry): void {
+  switch (entry.role) {
+    case 'TOOL':
+      writeln(`  \x1b[33m▸ Tool:\x1b[0m ${entry.content}`);
+      break;
+    case 'RES': {
+      const truncated = entry.content.length > 200
+        ? entry.content.slice(0, 200).replace(/\n/g, ' ') + '…'
+        : entry.content.replace(/\n/g, ' ');
+      writeln(`  \x1b[90m◂ Result:\x1b[0m ${truncated}`);
+      break;
+    }
+    case 'ASST': {
+      const truncated = entry.content.length > 300
+        ? entry.content.slice(0, 300).replace(/\n/g, ' ') + '…'
+        : entry.content.replace(/\n/g, ' ');
+      writeln(`  \x1b[32m▸\x1b[0m ${truncated}`);
+      break;
+    }
+    case 'SYS':
+      writeln(`  \x1b[90m▸ System:\x1b[0m ${entry.content}`);
+      break;
+    case 'COMPACT':
+      writeln(`  \x1b[90m▸ Context compacted\x1b[0m`);
+      break;
   }
 }
 
@@ -329,12 +546,30 @@ async function run() {
       if (text.length > lastOutputOffset) {
         const remaining = text.slice(lastOutputOffset);
         for (const line of remaining.split('\n')) {
-          if (line) writeln(line);
+          if (!line) continue;
+          // Filter stderr lines in final read too
+          if (/^subzeroclaw\s+·/.test(line)) {
+            const m = line.match(/·\s+([0-9a-f]{16})/);
+            if (m && !termSessionId) {
+              termSessionId = m[1];
+              termSessionLogOffset = 0;
+            }
+            continue;
+          }
+          if (/^\[compact\]/.test(line)) continue;
+          const turnMatch = line.match(/^\[(\d+)\]\s/);
+          if (turnMatch) {
+            writeln(`\n── Turn ${turnMatch[1]} ──`);
+          } else {
+            writeln(line);
+          }
         }
       }
     } catch (readErr) {
       console.warn('[output] final read failed:', readErr);
     }
+    // Final session log poll
+    await pollTerminalSessionLog();
 
     if (exitCode === 0) {
       writeln('\r\n--- Done ---');
@@ -348,9 +583,11 @@ async function run() {
     await bridge.stop();
     stopTimer();
     isRunning = false;
-    btnRun.disabled = false;
-    btnStop.style.display = 'none';
-    setStatus('Ready', 'ready');
+    if (!isCronMode) {
+      btnRun.disabled = false;
+      btnStop.style.display = 'none';
+      setStatus('Ready', 'ready');
+    }
   }
 }
 
@@ -434,6 +671,25 @@ async function boot() {
     btnPrivy.style.display = 'none';
   }
 
+  /* ── Run mode toggle (Once ↔ Cron) ──────────────────── */
+  const btnOnce = document.getElementById('run-mode-once') as HTMLButtonElement;
+  const btnCron = document.getElementById('run-mode-cron') as HTMLButtonElement;
+  const cronConfigEl = document.getElementById('cron-config')!;
+
+  function setRunModeUI(mode: 'once' | 'cron') {
+    btnOnce.classList.toggle('active', mode === 'once');
+    btnCron.classList.toggle('active', mode === 'cron');
+    cronConfigEl.style.display = mode === 'cron' ? '' : 'none';
+    updateRunButtonLabel(mode);
+  }
+
+  btnOnce.addEventListener('click', () => setRunModeUI('once'));
+  btnCron.addEventListener('click', () => setRunModeUI('cron'));
+
+  // Apply restored run mode to button label
+  const restoredMode = btnCron.classList.contains('active') ? 'cron' : 'once';
+  updateRunButtonLabel(restoredMode as 'once' | 'cron');
+
   /* Create markdown editors */
   envEditor = createEditor(
     document.getElementById('editor-env')!,
@@ -514,6 +770,9 @@ async function boot() {
   writeln('');
   writeln('Ready. Fill in config and click Run.');
   btnRun.disabled = false;
+
+  /* Chat is the default tab — initialize it now */
+  ensureChatStarted();
 }
 
 /* ── Helpers ────────────────────────────────────────────── */
@@ -529,12 +788,15 @@ function switchToTerminal() {
 
 btnRun.addEventListener('click', () => {
   switchToTerminal();
-  run();
+  const cfg = readConfig();
+  cfg.runMode === 'cron' ? runCron() : run();
 });
 
 btnStop.addEventListener('click', async () => {
   writeln('\r\nStopping agent...');
   btnStop.disabled = true;
+  cronAbort = true;
+  clearCronCountdown();
   await bridge.stop();
 });
 
@@ -542,9 +804,10 @@ btnStop.addEventListener('click', async () => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
-    if (!isRunning) {
+    if (!isRunning && !isCronMode) {
       switchToTerminal();
-      run();
+      const cfg = readConfig();
+      cfg.runMode === 'cron' ? runCron() : run();
     }
   }
 });
@@ -563,14 +826,215 @@ document.getElementById('btn-copy-term')!.addEventListener('click', () => {
   });
 });
 
+/* Copy chat contents (includes activity summaries) */
+document.getElementById('btn-copy-chat')!.addEventListener('click', () => {
+  const lines: string[] = [];
+
+  function processBubble(el: HTMLElement) {
+    const role = el.classList.contains('user') ? 'You' :
+                 el.classList.contains('assistant') ? 'Clawzien' : 'System';
+    const ts = el.querySelector('.chat-timestamp')?.textContent || '';
+    const content = el.querySelector('span:not(.chat-timestamp)')?.textContent || el.textContent || '';
+    lines.push(`[${ts}] ${role}: ${content.trim()}`);
+  }
+
+  function processActivity(el: HTMLElement) {
+    const summary = el.querySelector('.chat-activity-summary')?.textContent || '';
+    lines.push(`--- ${summary} ---`);
+    el.querySelectorAll('.activity-entry').forEach(entry => {
+      const label = entry.querySelector('.activity-label')?.textContent || '';
+      const body = entry.querySelector('.activity-body')?.textContent || '';
+      lines.push(`  ${label}${body}`);
+    });
+  }
+
+  chatMessages.childNodes.forEach(node => {
+    if (!(node instanceof HTMLElement)) return;
+
+    if (node.classList.contains('chat-msg')) {
+      // Wrapped message — find bubble or activity inside
+      const bubble = node.querySelector('.chat-bubble') as HTMLElement | null;
+      if (bubble) processBubble(bubble);
+      const activity = node.querySelector('.chat-activity') as HTMLElement | null;
+      if (activity) processActivity(activity);
+    } else if (node.classList.contains('chat-bubble')) {
+      // Unwrapped system message
+      processBubble(node);
+    } else if (node.classList.contains('chat-activity')) {
+      // Unwrapped activity (shouldn't happen with new code, but be safe)
+      processActivity(node);
+    }
+  });
+
+  const btn = document.getElementById('btn-copy-chat')!;
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy chat';
+      btn.classList.remove('copied');
+    }, 1500);
+  });
+});
+
 /* ── Chat helpers ──────────────────────────────────────── */
+
+function formatTimestamp(): string {
+  const now = new Date();
+  return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function createSenderHeader(role: 'user' | 'assistant'): HTMLDivElement {
+  const header = document.createElement('div');
+  header.className = 'chat-sender';
+
+  if (role === 'assistant') {
+    const avatar = document.createElement('canvas');
+    avatar.className = 'chat-avatar';
+    avatar.width = 24;
+    avatar.height = 24;
+    generateIdenticon(avatar, CLAWZIEN_SEED);
+    header.appendChild(avatar);
+  }
+
+  const name = document.createElement('span');
+  name.className = 'chat-sender-name';
+  name.textContent = role === 'user' ? 'You' : 'Clawzien';
+  header.appendChild(name);
+
+  return header;
+}
 
 function appendChatMessage(role: 'user' | 'assistant' | 'system', text: string) {
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role}`;
-  bubble.textContent = text;
-  chatMessages.appendChild(bubble);
+
+  const content = document.createElement('span');
+  content.textContent = text;
+  bubble.appendChild(content);
+
+  const ts = document.createElement('span');
+  ts.className = 'chat-timestamp';
+  ts.textContent = formatTimestamp();
+  bubble.appendChild(ts);
+
+  if (role === 'system') {
+    // System messages remain unwrapped
+    chatMessages.appendChild(bubble);
+  } else {
+    const wrapper = document.createElement('div');
+    wrapper.className = `chat-msg ${role}`;
+    wrapper.appendChild(createSenderHeader(role));
+    wrapper.appendChild(bubble);
+    chatMessages.appendChild(wrapper);
+  }
+
   chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+/* ── Chat activity rendering ───────────────────────────── */
+
+function createActivityContainer(): void {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'chat-msg assistant';
+
+  // Sender header with flickering avatar
+  const header = document.createElement('div');
+  header.className = 'chat-sender';
+
+  const avatar = document.createElement('canvas');
+  avatar.className = 'chat-avatar';
+  avatar.width = 24;
+  avatar.height = 24;
+  generateIdenticon(avatar, CLAWZIEN_SEED);
+  header.appendChild(avatar);
+
+  const name = document.createElement('span');
+  name.className = 'chat-sender-name';
+  name.textContent = 'Clawzien';
+  header.appendChild(name);
+
+  wrapper.appendChild(header);
+
+  const details = document.createElement('details');
+  details.className = 'chat-activity';
+
+  const summary = document.createElement('summary');
+  summary.className = 'chat-activity-summary';
+  summary.textContent = 'Agent working...';
+  details.appendChild(summary);
+
+  const content = document.createElement('div');
+  content.className = 'chat-activity-content';
+  details.appendChild(content);
+
+  wrapper.appendChild(details);
+  chatMessages.appendChild(wrapper);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  currentActivityEl = details;
+  currentActivityContent = content;
+  currentActivitySummary = summary;
+  currentActivityWrapper = wrapper;
+  activityEntryCount = 0;
+
+  // Start flickering the avatar
+  flickeringAvatar = avatar;
+  startAvatarFlicker();
+}
+
+function formatActivityLabel(entry: ActivityEntry): string {
+  const time = entry.timestamp.split(' ')[1] || entry.timestamp;
+  switch (entry.role) {
+    case 'TOOL': return `[${time}] Tool: `;
+    case 'RES': return `[${time}] Result: `;
+    case 'ASST': return `[${time}] Thinking: `;
+    case 'SYS': return `[${time}] System: `;
+    case 'COMPACT': return `[${time}] Compact: `;
+    default: return `[${time}] ${entry.role}: `;
+  }
+}
+
+function appendActivityEntries(entries: ActivityEntry[]): void {
+  if (!currentActivityEl) {
+    createActivityContainer();
+  }
+
+  for (const entry of entries) {
+    const div = document.createElement('div');
+    div.className = `activity-entry activity-${entry.role.toLowerCase()}`;
+
+    const label = document.createElement('span');
+    label.className = 'activity-label';
+    label.textContent = formatActivityLabel(entry);
+    div.appendChild(label);
+
+    const body = document.createElement('span');
+    body.className = 'activity-body';
+    const text = entry.role === 'RES' && entry.content.length > 500
+      ? entry.content.slice(0, 500) + '...'
+      : entry.content;
+    body.textContent = text;
+    div.appendChild(body);
+
+    currentActivityContent!.appendChild(div);
+    activityEntryCount++;
+  }
+
+  currentActivitySummary!.textContent = `Agent working... (${activityEntryCount} steps)`;
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function finalizeActivity(): void {
+  if (currentActivitySummary) {
+    currentActivitySummary.textContent = `Agent activity (${activityEntryCount} steps)`;
+  }
+  stopAvatarFlicker();
+  currentActivityEl = null;
+  currentActivityContent = null;
+  currentActivitySummary = null;
+  currentActivityWrapper = null;
+  activityEntryCount = 0;
 }
 
 function ensureChatStarted() {
@@ -593,13 +1057,25 @@ function ensureChatStarted() {
     cfg.model,
     cfg.endpoint,
     envContext,
-    { onMessage: appendChatMessage },
+    {
+      onMessage: appendChatMessage,
+      onActivity: appendActivityEntries,
+      onActivityDone: finalizeActivity,
+    },
   );
 }
 
 function sendChatMessage() {
   const text = chatInput.value.trim();
   if (!text || !chat.isChatRunning() || chat.isChatBusy()) return;
+
+  // Reset activity state for new message
+  currentActivityEl = null;
+  currentActivityContent = null;
+  currentActivitySummary = null;
+  currentActivityWrapper = null;
+  activityEntryCount = 0;
+
   appendChatMessage('user', text);
   chatInput.value = '';
   chatInput.style.height = 'auto';

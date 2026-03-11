@@ -65,11 +65,12 @@ export async function stop(): Promise<void> {
   }
 }
 
-/** Clear the stop file (call before starting agent) */
+/** Clear the stop file and reset queue (call before starting agent) */
 export async function clearStop(): Promise<void> {
   if (!cx) return;
+  processing.clear();
   try {
-    await cx.run('/bin/bash', ['-c', `rm -f ${STOP_FILE}`], RUN_OPTS);
+    await cx.run('/bin/bash', ['-c', `rm -f ${STOP_FILE} /ipc/_queue`], RUN_OPTS);
   } catch { /* ignore */ }
 }
 
@@ -79,27 +80,26 @@ export async function ensureDirs(): Promise<void> {
   await cx.run('/bin/bash', ['-c', 'mkdir -p /tmp/bridge'], RUN_OPTS);
 }
 
-/** Poll for .ready files in /ipc — write listing to /ipc/_pending.txt, then read via ipcDevice */
+/**
+ * Poll for requests by reading /ipc/_queue directly via ipcDevice — NO cx.run().
+ * curl-bridge.sh and cast-bridge.sh append their request ID to /ipc/_queue
+ * instead of relying on ls/sed listing of .ready files.
+ */
 async function pollForRequests(): Promise<void> {
   if (!cx || polling) return;
   polling = true;
 
   try {
-    // List .ready files in /ipc, extract request IDs
-    await cx.run('/bin/bash', ['-c',
-      `ls /ipc/*.ready 2>/dev/null | sed 's|.*/||' | sed 's/\\.ready$//' > /ipc/_pending.txt 2>/dev/null || true`,
-    ], RUN_OPTS);
+    const queueBlob = await readBlob('/_queue').catch(() => null);
+    if (!queueBlob) return;
 
-    const pendingBlob = await readBlob('/_pending.txt').catch(() => null);
-    if (!pendingBlob) return;
-
-    const pendingText = await pendingBlob.text();
-    const ids = pendingText.trim().split('\n').filter(Boolean);
+    const queueText = await queueBlob.text();
+    const ids = queueText.trim().split('\n').filter(Boolean);
 
     for (const id of ids) {
       if (processing.has(id)) continue;
       processing.add(id);
-      handleRequest(id).finally(() => processing.delete(id));
+      handleRequest(id);
     }
   } catch {
     // Polling errors are expected during boot / heavy load — just retry next tick
@@ -130,6 +130,13 @@ async function handleRequest(id: string): Promise<void> {
       responseText = await handleCastRequest(req);
     } else {
       responseText = JSON.stringify({ error: { message: `unknown request type: ${req.type}` } });
+    }
+
+    // Cap response size to avoid OOM in the 32-bit WASM VM
+    const MAX_RESPONSE = 512 * 1024; // 512 KB
+    if (responseText.length > MAX_RESPONSE) {
+      console.warn(`[bridge] response ${id} truncated: ${responseText.length} bytes → ${MAX_RESPONSE}`);
+      responseText = responseText.slice(0, MAX_RESPONSE);
     }
 
     // Write response to /data via dataDevice (VM reads from /data/resp_ID.json)

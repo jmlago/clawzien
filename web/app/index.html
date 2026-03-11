@@ -105,6 +105,7 @@
     #status.ready { background: var(--green-bg); color: var(--green); }
     #status.running { background: #2a1a0a; color: var(--amber); }
     #status.error { background: var(--red-bg); color: var(--red); }
+    #status.cron-waiting { background: #1a1a2a; color: #7a8aaa; }
     .header-btn {
       padding: 5px 14px;
       border: none;
@@ -441,6 +442,28 @@
       padding: 0;
       background: var(--bg);
     }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      padding: 6px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+      flex-shrink: 0;
+    }
+    .chat-header .spacer { flex: 1; }
+    .chat-header button {
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--surface);
+      color: var(--fg2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+    }
+    .chat-header button:hover { color: var(--fg); border-color: #2a2a2a; }
+    .chat-header button.copied { color: var(--green); border-color: var(--green); }
     .chat-messages {
       flex: 1;
       overflow-y: auto;
@@ -458,6 +481,12 @@
       white-space: pre-wrap;
       word-wrap: break-word;
       font-family: var(--font-mono);
+    }
+    .chat-bubble .chat-timestamp {
+      display: block;
+      font-size: 10px;
+      color: var(--fg3);
+      margin-top: 6px;
     }
     .chat-bubble.user {
       align-self: flex-end;
@@ -526,16 +555,99 @@
       opacity: 0.4;
       cursor: not-allowed;
     }
+
+    /* ── Chat activity (collapsible) ──────────────── */
+    .chat-activity {
+      align-self: flex-start;
+      max-width: 85%;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 0;
+      font-family: var(--font-mono);
+    }
+    .chat-activity-summary {
+      font-size: 11px;
+      color: var(--fg2);
+      padding: 8px 12px;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    .chat-activity-summary::-webkit-details-marker { display: none; }
+    .chat-activity-summary::before {
+      content: '\25B8  ';
+      color: var(--fg3);
+    }
+    .chat-activity[open] > .chat-activity-summary::before {
+      content: '\25BE  ';
+    }
+    .chat-activity-content {
+      max-height: 400px;
+      overflow-y: auto;
+      padding: 0 12px 8px;
+    }
+    .activity-entry {
+      font-size: 11px;
+      color: var(--fg2);
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border);
+      line-height: 1.4;
+    }
+    .activity-entry:last-child { border-bottom: none; }
+    .activity-label {
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .activity-tool .activity-label { color: var(--amber-dim); }
+    .activity-asst .activity-label { color: var(--green); }
+    .activity-res .activity-body {
+      font-size: 10px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 150px;
+      overflow-y: auto;
+      display: block;
+    }
+
+    /* ── Chat message wrappers (sender + bubble) ──── */
+    .chat-msg {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-width: 75%;
+    }
+    .chat-msg.user { align-self: flex-end; }
+    .chat-msg.assistant { align-self: flex-start; }
+    .chat-msg .chat-bubble,
+    .chat-msg .chat-activity { max-width: none; align-self: auto; }
+    .chat-sender {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+    }
+    .chat-msg.user .chat-sender { justify-content: flex-end; }
+    .chat-sender-name {
+      font-size: 11px;
+      color: var(--fg2);
+      font-weight: 500;
+    }
+    .chat-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      image-rendering: pixelated;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>Claw<span>zien</span></h1>
     <nav class="nav">
-      <button class="nav-btn active" data-view="run">Terminal</button>
+      <button class="nav-btn active" data-view="chat">Chat</button>
+      <button class="nav-btn" data-view="run">Terminal</button>
       <button class="nav-btn" data-view="skills">Skills</button>
       <button class="nav-btn" data-view="settings">Settings</button>
-      <button class="nav-btn" data-view="chat">Chat</button>
     </nav>
     <div class="header-right">
       <span id="status">Initializing...</span>
@@ -546,7 +658,7 @@
 
   <div class="main">
     <!-- Terminal view -->
-    <div class="view active" id="view-run">
+    <div class="view" id="view-run">
       <div class="terminal-header">
         <span id="run-timer" class="cost-display run-timer"></span>
         <span id="cost-run" class="cost-display"></span>
@@ -633,6 +745,23 @@
           <button class="secret-btn" data-action="copy" data-target="moltbook-key" title="Copy">&#x2398;</button>
         </div>
       </div>
+      <div class="field">
+        <label>Run Mode</label>
+        <div class="wallet-toggle">
+          <button id="run-mode-once" class="toggle-btn active">Once</button>
+          <button id="run-mode-cron" class="toggle-btn">Cron</button>
+        </div>
+      </div>
+      <div id="cron-config" style="display:none">
+        <div class="field">
+          <label>Interval (minutes between runs)</label>
+          <input type="number" id="cron-interval" value="30" min="1" max="1440" />
+        </div>
+        <div class="field">
+          <label>Timeout (max minutes per run)</label>
+          <input type="number" id="cron-timeout" value="10" min="1" max="120" />
+        </div>
+      </div>
       <div class="env-hint">
         Pre-populate from <code>web/.env</code>:<br>
         <code>VITE_API_KEY="sk-or-..."</code><br>
@@ -642,7 +771,11 @@
     </div>
 
     <!-- Chat view -->
-    <div class="view" id="view-chat">
+    <div class="view active" id="view-chat">
+      <div class="chat-header">
+        <div class="spacer"></div>
+        <button id="btn-copy-chat">Copy chat</button>
+      </div>
       <div class="chat-messages" id="chat-messages">
         <div class="chat-bubble system">Welcome to the Clawzien chat assistant. Open this tab to start a conversation about skills, prompts, and configuration.</div>
       </div>

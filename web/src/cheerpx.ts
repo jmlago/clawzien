@@ -110,7 +110,7 @@ export async function boot(
   // Ensure bridge stop-file directory exists and clean stale stop file
   await cx.run('/bin/bash', ['-c', 'mkdir -p /tmp/bridge && rm -f /tmp/bridge/stop'], RUN_OPTS);
 
-  // Clean stale IPC files from previous sessions
+  // Clean stale IPC files from previous sessions (including _queue)
   await cx.run('/bin/bash', ['-c', 'rm -f /ipc/* 2>/dev/null || true'], RUN_OPTS);
 
   // Clean stale tmux sockets (persistent IndexedDB may carry old ones)
